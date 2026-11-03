@@ -1,0 +1,69 @@
+# Auto Apply default config. Validated by src/config/schema.ts at startup.
+# Relative paths resolve against the project root.
+
+profileDir: ./profile
+dataDir: ./data
+outputDir: ./output
+sessionsDir: ./sessions
+
+workers: 2
+
+# Leave empty to auto detect (CHROMIUM_PATH, Playwright's Chromium, or system Chrome).
+browser: {}
+
+# Pause between two jobs on the same site.
+pacing:
+  minDelayMs: 2000
+  maxDelayMs: 6000
+
+# "auto" submit is downgraded to "review" until a site type has enough verified runs.
+gate:
+  enforce: true
+  minRuns: 10
+  minAccuracy: 0.9
+
+maxAttempts: 2
+
+llm:
+  provider: openrouter
+  # Placeholders. Pick real OpenRouter model ids after the Phase 0 baseline.
+  models:
+    cheap: TBD-cheap-model
+    mid: TBD-mid-model
+    strong: TBD-strong-model
+  dailyBudgetUsd: 2
+
+# Job Search Board is reached over MCP at a URL. Set BOARD_MCP_URL and BOARD_MCP_TOKEN in .env.
+board:
+  type: mcp
+  tokenEnv: BOARD_MCP_TOKEN
+
+sites:
+  greenhouse: { backend: playwright-chromium, submit: review, dailyCap: 30, headless: true }
+  company_site: { backend: playwright-chromium, submit: review, dailyCap: 20, headless: true }
+  workday: { backend: playwright-chromium, submit: review, dailyCap: 10, headless: false }
+  indeed: { backend: playwright-chromium, submit: review, dailyCap: 10, headless: false }
+  linkedin: { backend: playwright-chromium, submit: review, dailyCap: 10, headless: false }
+  glassdoor: { backend: playwright-chromium, submit: review, dailyCap: 10, headless: false }
+
+backends:
+  shadow:
+    enabled: false
+    name: ai-browser
+    sample: 0.2
+
+# Job boards used for discovery. Selectors are best guesses and are NOT verified against the live
+# sites. Check them with "pnpm cli intake --dry-run" before relying on them.
+sources:
+  indeed:
+    baseUrl: https://sg.indeed.com
+    searchPath: /jobs?q={q}&l={l}
+    linkSelector: a[href*="/viewjob"]
+  linkedin:
+    baseUrl: https://www.linkedin.com
+    searchPath: /jobs/search/?keywords={q}&location={l}
+    linkSelector: a[href*="/jobs/view/"]
+  glassdoor:
+    baseUrl: https://www.glassdoor.sg
+    searchPath: /Job/jobs.htm?sc.keyword={q}&locKeyword={l}
+    linkSelector: a[href*="/job-listing/"]

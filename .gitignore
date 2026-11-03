@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+.env
+
+# user data and runtime output
+profile/
+data/
+output/
+sessions/
+
+# future rust project build output
+ai-browser/target/
+demo-output/

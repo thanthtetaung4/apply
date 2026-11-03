@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{name}} - Resume</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 13mm 15mm;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font-family: Inter, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+        font-size: 9.4pt;
+        line-height: 1.36;
+        color: #111827;
+        margin: 0;
+      }
+      header h1 {
+        font-size: 21pt;
+        margin: 0;
+        letter-spacing: 0.2px;
+      }
+      header .headline {
+        font-size: 10.5pt;
+        color: #374151;
+        margin: 1px 0 3px;
+      }
+      header .contact {
+        font-size: 8.8pt;
+        color: #4b5563;
+      }
+      h2 {
+        font-size: 9pt;
+        text-transform: uppercase;
+        letter-spacing: 1.1px;
+        border-bottom: 1px solid #9ca3af;
+        padding-bottom: 2px;
+        margin: 11px 0 5px;
+      }
+      .summary {
+        text-align: justify;
+        margin: 8px 0 0;
+      }
+      .item {
+        margin-bottom: 6px;
+        break-inside: avoid;
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-weight: 600;
+      }
+      .row .when {
+        font-weight: 400;
+        color: #4b5563;
+        white-space: nowrap;
+      }
+      .sub {
+        color: #374151;
+        font-style: italic;
+      }
+      ul {
+        margin: 2px 0 0;
+        padding-left: 15px;
+      }
+      li {
+        margin-bottom: 1px;
+      }
+      .skills div {
+        margin-bottom: 1px;
+      }
+      .skills b {
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>{{name}}</h1>
+      <div class="headline">{{headline}}</div>
+      <div class="contact">{{contact}}</div>
+    </header>
+    {{summary}} {{experience}} {{projects}} {{skills}} {{education}} {{certifications}}
+  </body>
+</html>
