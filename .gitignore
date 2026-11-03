@@ -1,14 +1,14 @@
 node_modules/
 dist/
 coverage/
+.next/
 .env
-
-# user data and runtime output
+.env.local
 profile/
-data/
 output/
 sessions/
-
-# future rust project build output
 ai-browser/target/
 demo-output/
+apps/web/e2e-output/
+*.tsbuildinfo
+_incoming/

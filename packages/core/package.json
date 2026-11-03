@@ -1,0 +1,41 @@
+{
+  "name": "@apply/core",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./profile": "./src/profile/index.ts",
+    "./settings": "./src/settings.ts",
+    "./store": "./src/store.ts",
+    "./retry": "./src/retry.ts",
+    "./status": "./src/shared/status.ts",
+    "./job": "./src/shared/job.ts",
+    "./redact": "./src/shared/redact.ts",
+    "./report": "./src/metrics/report.ts",
+    "./gate": "./src/metrics/gate.ts",
+    "./engine": "./src/engine.ts",
+    "./intake": "./src/intake/index.ts",
+    "./board": "./src/board/index.ts",
+    "./browser": "./src/browser/index.ts",
+    "./llm": "./src/llm/index.ts",
+    "./demo": "./src/demo/index.ts",
+    "./profile-fs": "./src/profile/fs.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "node-html-parser": "^9.0.6",
+    "pdf-lib": "^1.17.1",
+    "playwright-core": "^1.64.1",
+    "puppeteer-core": "^25.16.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "~5.9.3",
+    "vitest": "^5.1.0"
+  }
+}
