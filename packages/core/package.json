@@ -19,7 +19,8 @@
     "./browser": "./src/browser/index.ts",
     "./llm": "./src/llm/index.ts",
     "./demo": "./src/demo/index.ts",
-    "./profile-fs": "./src/profile/fs.ts"
+    "./profile-fs": "./src/profile/fs.ts",
+    "./signin": "./src/signin.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

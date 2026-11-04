@@ -1,0 +1,2 @@
+ALTER TABLE "jobs" DROP CONSTRAINT "jobs_source_ck";--> statement-breakpoint
+ALTER TABLE "jobs" ADD CONSTRAINT "jobs_source_ck" CHECK ("jobs"."source" in ('indeed', 'linkedin', 'glassdoor', 'direct'));

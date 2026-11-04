@@ -44,6 +44,11 @@ export function formToSettings(
     )
     set(num(fd, `sites.${t}.dailyCap`), (v) => (s.sites[t].dailyCap = v))
     set(text(fd, `sites.${t}.backend`), (v) => (s.sites[t].backend = v))
+    // An empty choice means "no fallback browser".
+    set(text(fd, `sites.${t}.fallback`), (v) => {
+      if (v) s.sites[t].fallback = v
+      else delete s.sites[t].fallback
+    })
   }
   for (const src of ['indeed', 'linkedin', 'glassdoor'] as const) {
     s.sources[src].enabled = bool(fd, `sources.${src}.enabled`)
@@ -57,4 +62,33 @@ export function formToSettings(
   set(num(fd, 'backends.shadow.sample'), (v) => (s.backends.shadow.sample = v / 100))
 
   return parseSettings(s)
+}
+
+/** Readable names for setting paths, used in error messages. */
+const LABELS: [RegExp, string][] = [
+  [/^pacing\.minDelayMs/, 'Shortest pause'],
+  [/^pacing\.maxDelayMs/, 'Longest pause'],
+  [/^workers/, 'Browsers at once'],
+  [/^maxAttempts/, 'Tries per job'],
+  [/^gate\.minRuns/, 'Verified runs needed'],
+  [/^gate\.minAccuracy/, 'Share that must pass checks'],
+  [/^llm\.models\.(\w+)/, 'Model ($1)'],
+  [/^llm\.dailyBudgetUsd/, 'Daily model budget'],
+  [/^sites\.(\w+)\.dailyCap/, 'Max per day ($1)'],
+  [/^sites\.(\w+)\.(backend|fallback)/, 'Browser ($1)'],
+  [/^sources\.(\w+)\.baseUrl/, 'Site address ($1)'],
+  [/^sources\.(\w+)\.searchPath/, 'Search path ($1)'],
+  [/^sources\.(\w+)\.linkSelector/, 'Job link selector ($1)'],
+  [/^sources\.(\w+)\.maxPerSearch/, 'Jobs per search ($1)'],
+  [/^backends\.shadow\.sample/, 'Share of jobs compared'],
+]
+
+/** "pacing.maxDelayMs: message" becomes "Longest pause: message". */
+export function settingLabel(issue: string): string {
+  const i = issue.indexOf(': ')
+  if (i < 0) return issue
+  const path = issue.slice(0, i)
+  for (const [re, label] of LABELS)
+    if (re.test(path)) return `${path.replace(re, label)}: ${issue.slice(i + 2)}`
+  return issue
 }

@@ -7,9 +7,11 @@ import type {
   SessionStore,
   StorageState,
 } from '@apply/core/store'
+import type { KeyObject } from 'node:crypto'
 import { and, eq, gte, sql } from 'drizzle-orm'
 import type { Db } from './client'
 import { decryptString, encryptString } from './crypto'
+import { isSealed, open, seal } from './sealed'
 import { artifacts, browserSessions, llmCache, llmUsage } from './schema'
 
 const utcDayStart = (d: Date) =>
@@ -136,51 +138,97 @@ export class PgArtifactStore implements ArtifactStore {
 
 export const SESSION_KEY_PATTERN = /^(indeed|linkedin|glassdoor|workday-[a-z0-9][a-z0-9-]{0,60})$/
 
-/** Saved browser sign ins, encrypted with the app key and bound to the owner. */
+/**
+ * Keys for saved sign ins. The web app gets only `seal` (the worker's public key), so it can store
+ * a session but never read one. The worker gets `open` (its private keys) as well.
+ */
+export interface SessionKeys {
+  seal?: KeyObject
+  open?: KeyObject[]
+}
+
+export type SessionStatus = 'connected' | 'expired'
+
+export interface SessionInfo {
+  key: string
+  updatedAt: Date
+  status: SessionStatus
+  statusAt: Date
+}
+
+/**
+ * Saved browser sign ins, bound to the owner and session name. New values are sealed to the
+ * worker's public key. Values written before that (v1, app key) are still read, and the worker
+ * re-seals them on its next save.
+ */
 export class PgSessionStore implements SessionStore {
   constructor(
     private readonly db: Db,
     private readonly userId: string,
     private readonly key: Buffer,
+    private readonly keys: SessionKeys = {},
   ) {}
 
   private ctx(name: string) {
     return `${this.userId}:browser_session:${name}`
   }
 
+  private where(name: string) {
+    return and(eq(browserSessions.userId, this.userId), eq(browserSessions.key, name))
+  }
+
   async get(name: string): Promise<StorageState | undefined> {
     const [r] = await this.db
       .select({ ciphertext: browserSessions.ciphertext })
       .from(browserSessions)
-      .where(and(eq(browserSessions.userId, this.userId), eq(browserSessions.key, name)))
+      .where(this.where(name))
     if (!r) return undefined
+    if (isSealed(r.ciphertext)) {
+      if (!this.keys.open?.length) throw new Error('Only the worker can read saved sign ins.')
+      return JSON.parse(open(this.keys.open, this.ctx(name), r.ciphertext)) as StorageState
+    }
     return JSON.parse(decryptString(this.key, this.ctx(name), r.ciphertext)) as StorageState
   }
 
+  /** Save a sign in and mark it connected. */
   async put(name: string, state: StorageState): Promise<void> {
     if (!SESSION_KEY_PATTERN.test(name)) throw new Error(`Invalid session name "${name}"`)
-    const ciphertext = encryptString(this.key, this.ctx(name), JSON.stringify(state))
+    const plain = JSON.stringify(state)
+    const ciphertext = this.keys.seal
+      ? seal(this.keys.seal, this.ctx(name), plain)
+      : encryptString(this.key, this.ctx(name), plain)
+    const now = new Date()
+    const set = { ciphertext, updatedAt: now, status: 'connected' as const, statusAt: now }
     await this.db
       .insert(browserSessions)
-      .values({ userId: this.userId, key: name, ciphertext, updatedAt: new Date() })
-      .onConflictDoUpdate({
-        target: [browserSessions.userId, browserSessions.key],
-        set: { ciphertext, updatedAt: new Date() },
-      })
+      .values({ userId: this.userId, key: name, ...set })
+      .onConflictDoUpdate({ target: [browserSessions.userId, browserSessions.key], set })
   }
 
-  /** Names and ages only. Never returns the cookies. */
-  async list(): Promise<{ key: string; updatedAt: Date }[]> {
-    return this.db
-      .select({ key: browserSessions.key, updatedAt: browserSessions.updatedAt })
+  /** The site showed a sign in page with this session. Keeps the value; the user signs in again. */
+  async markExpired(name: string): Promise<void> {
+    await this.db
+      .update(browserSessions)
+      .set({ status: 'expired', statusAt: new Date() })
+      .where(and(this.where(name), eq(browserSessions.status, 'connected')))
+  }
+
+  /** Names, ages and status only. Never returns the cookies. */
+  async list(): Promise<SessionInfo[]> {
+    const rows = await this.db
+      .select({
+        key: browserSessions.key,
+        updatedAt: browserSessions.updatedAt,
+        status: browserSessions.status,
+        statusAt: browserSessions.statusAt,
+      })
       .from(browserSessions)
       .where(eq(browserSessions.userId, this.userId))
       .orderBy(browserSessions.key)
+    return rows.map((r) => ({ ...r, status: r.status as SessionStatus }))
   }
 
   async remove(name: string): Promise<void> {
-    await this.db
-      .delete(browserSessions)
-      .where(and(eq(browserSessions.userId, this.userId), eq(browserSessions.key, name)))
+    await this.db.delete(browserSessions).where(this.where(name))
   }
 }

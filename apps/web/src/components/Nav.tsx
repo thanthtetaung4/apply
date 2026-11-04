@@ -8,6 +8,7 @@ const ITEMS = [
   { href: '/needs-you', label: 'Needs you', badge: true },
   { href: '/jobs', label: 'Jobs' },
   { href: '/profile', label: 'Profile' },
+  { href: '/files', label: 'Files' },
   { href: '/connections', label: 'Connections' },
   { href: '/settings', label: 'Settings' },
   { href: '/report', label: 'Report' },

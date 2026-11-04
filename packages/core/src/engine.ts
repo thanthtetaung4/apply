@@ -11,7 +11,7 @@ import type { LlmProvider } from './llm/types'
 import { Orchestrator } from './orchestrator'
 import type { Profile } from './profile'
 import type { UserSettings } from './settings'
-import type { JobSource } from './shared/status'
+import type { SearchSource } from './shared/status'
 import type { Stores } from './store'
 import { ResumeRenderer } from './tailor'
 
@@ -59,7 +59,11 @@ export interface Engine {
   orchestrator: Orchestrator
   registry: BackendRegistry
   gateway: LlmGateway
-  intake(options?: { sources?: JobSource[]; dryRun?: boolean }): Promise<IntakeSummary>
+  intake(options?: {
+    sources?: SearchSource[]
+    urls?: string[]
+    dryRun?: boolean
+  }): Promise<IntakeSummary>
   close(): Promise<void>
 }
 
@@ -103,6 +107,7 @@ export async function createEngine(o: EngineOptions): Promise<Engine> {
         sessions: o.stores.sessions,
         targetRules: o.targetRules,
         sources: options.sources,
+        urls: options.urls,
         dryRun: options.dryRun,
         log: o.log,
       }),

@@ -4,6 +4,7 @@ import {
   type BrowserContext,
   type BrowserContextOptions,
   type Frame,
+  type Locator,
   type Page,
 } from 'playwright-core'
 import type { StorageState } from '../store'
@@ -31,6 +32,7 @@ interface Extracted {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 export function classifyAction(label: string, hasFields: boolean): ActionKind {
   const l = label.toLowerCase().trim()
@@ -103,6 +105,8 @@ class PlaywrightSession implements BrowserSession {
   private fieldFrames = new Map<string, Frame>()
   private fieldMeta = new Map<string, FormField>()
   private actionFrames = new Map<string, Frame>()
+  /** Options of custom dropdowns, read once per page. null: none until typing (a search box). */
+  private comboOptions = new Map<string, string[] | null>()
 
   constructor(
     readonly backend: string,
@@ -120,7 +124,12 @@ class PlaywrightSession implements BrowserSession {
   }
 
   async content(): Promise<string> {
-    return this.page.content()
+    // Real sites redirect after load (LinkedIn does), which makes page.content() throw "the page
+    // is navigating". Wait for the page to settle and try again.
+    return this.retry(async () => {
+      await this.settle()
+      return this.page.content()
+    }, 5)
   }
 
   async snapshot(): Promise<PageSnapshot> {
@@ -133,6 +142,17 @@ class PlaywrightSession implements BrowserSession {
           .slice(0, 12),
       })),
     )
+    // Embedded forms (Greenhouse inside stripe.com) show their messages, attached file names and
+    // confirmations in a child frame. Add the text of frames that hold form fields.
+    const formFrames = new Set(
+      [...this.fieldFrames.values()].filter((f) => f !== this.page.mainFrame() && !f.isDetached()),
+    )
+    for (const frame of formFrames) {
+      const t = await frame
+        .evaluate('(document.body ? document.body.innerText : "").replace(/\\s+/g, " ").trim()')
+        .catch(() => '')
+      if (t) data.text = `${data.text} ${String(t).slice(0, 4000)}`
+    }
     return { url: this.page.url(), title: await this.page.title(), ...data }
   }
 
@@ -164,6 +184,25 @@ class PlaywrightSession implements BrowserSession {
       for (const a of result.actions) rawActions.push({ ...a, frame })
       errors.push(...result.errors)
       stepText ||= result.stepText
+    }
+
+    // Custom dropdowns only render their options when opened. Open each once per page, read the
+    // options, close it. Those with options become selects; those without are search boxes that
+    // suggest only after typing (location fields).
+    for (const f of fields) {
+      if (f.hint !== 'combobox' || f.disabled) continue
+      const key = `${this.page.url()}|${f.id}`
+      let opts = this.comboOptions.get(key)
+      if (opts === undefined) {
+        opts = await this.readComboOptions(this.fieldFrames.get(f.id)!, f.id)
+        this.comboOptions.set(key, opts)
+      }
+      if (opts && opts.length > 0) {
+        f.type = 'select'
+        f.options = opts
+      } else {
+        f.hint = 'autocomplete'
+      }
     }
 
     const actions: FormAction[] = rawActions.map((a) => {
@@ -207,7 +246,8 @@ class PlaywrightSession implements BrowserSession {
           options.find((o) => o.toLowerCase().includes(want) || want.includes(o.toLowerCase()))
         if (!hit)
           throw new BrowserError(`"${text}" is not an option of "${field.label}"`, 'no_such_field')
-        await loc.first().selectOption({ label: hit })
+        if (field.hint === 'combobox') await this.pickComboOption(frame, loc.first(), hit)
+        else await loc.first().selectOption({ label: hit })
         break
       }
       case 'radio': {
@@ -219,7 +259,9 @@ class PlaywrightSession implements BrowserSession {
             : options.findIndex((o) => o.toLowerCase().includes(want))
         if (idx < 0)
           throw new BrowserError(`"${text}" is not an option of "${field.label}"`, 'no_such_field')
-        await loc.nth(idx).check({ force: true })
+        // Choice buttons (Ashby's Yes / No) are clicked, not checked.
+        if (field.hint === 'buttons') await loc.nth(idx).click()
+        else await loc.nth(idx).check({ force: true })
         break
       }
       case 'checkbox': {
@@ -238,17 +280,114 @@ class PlaywrightSession implements BrowserSession {
       case 'file':
         throw new BrowserError(`Use upload() for file field "${field.label}"`, 'no_such_field')
       default: {
-        await loc.first().fill(text)
-        if (field.hint === 'combobox') {
-          const option = frame
-            .getByRole('option', {
-              name: new RegExp(text.slice(0, 20).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'),
-            })
-            .first()
-          if (await option.isVisible({ timeout: 1500 }).catch(() => false)) await option.click()
+        if (field.hint === 'autocomplete' || field.hint === 'combobox') {
+          await this.pickSuggestion(frame, loc.first(), field.label, text)
+        } else {
+          await loc.first().fill(text)
         }
       }
     }
+  }
+
+  /** Visible options of the list a dropdown input controls, or of any open list. */
+  private async listOptions(frame: Frame, input: Locator): Promise<Locator> {
+    const owned = await input
+      .evaluate('(e) => e.getAttribute("aria-controls") || e.getAttribute("aria-owns") || ""')
+      .catch(() => '')
+    const list = owned
+      ? frame.locator(`[id="${String(owned)}"]`)
+      : frame.locator('[role=listbox]:visible')
+    return list.locator('[role=option]')
+  }
+
+  /** Open a custom dropdown, read its option labels, close it again. */
+  private async readComboOptions(frame: Frame, id: string): Promise<string[] | null> {
+    const input = frame.locator(`[data-aa="${id}"]`).first()
+    try {
+      await input.click({ timeout: 3000 })
+      let texts: string[] = []
+      for (let i = 0; i < 4 && texts.length === 0; i++) {
+        if (i === 2) await input.press('ArrowDown').catch(() => undefined)
+        await sleep(200)
+        texts = await (await this.listOptions(frame, input)).allInnerTexts()
+      }
+      return texts
+        .map((t) => t.replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+        .slice(0, 500)
+    } catch {
+      return null
+    } finally {
+      await input.press('Escape').catch(() => undefined)
+      await input.evaluate('(e) => e.blur()').catch(() => undefined)
+    }
+  }
+
+  /** Choose an option in a custom dropdown: open it, narrow it by typing, click the option. */
+  private async pickComboOption(frame: Frame, input: Locator, option: string): Promise<void> {
+    const exact = new RegExp(`^\\s*${escapeRe(option)}\\s*$`, 'i')
+    // Wait for the option to render, then click it. Note: locator.isVisible() does not wait
+    // (its timeout is ignored), which made this fail at random on a real Stripe form.
+    const clickOption = async (ms: number) => {
+      const options = await this.listOptions(frame, input)
+      let target = options.filter({ hasText: exact })
+      if ((await target.count()) === 0) target = options.filter({ hasText: option })
+      try {
+        await target.first().waitFor({ state: 'visible', timeout: ms })
+        await target.first().click()
+        await sleep(150)
+        return true
+      } catch {
+        return false
+      }
+    }
+    await input.click()
+    // Short lists show the option as soon as they open.
+    if (await clickOption(1500)) return
+    // Long lists (countries, schools) need typing to bring it into view.
+    await input.fill('').catch(() => undefined)
+    await input.pressSequentially(option.slice(0, 40), { delay: 15 })
+    if (await clickOption(6000)) return
+    // Last resort: typing left exactly this option, and Enter picks it.
+    const left = (await (await this.listOptions(frame, input)).allInnerTexts()).map((t) => t.trim())
+    if (left.length === 1 && left[0]!.toLowerCase() === option.trim().toLowerCase()) {
+      await input.press('Enter')
+      await sleep(150)
+      return
+    }
+    await input.press('Escape').catch(() => undefined)
+    throw new BrowserError(`Could not choose "${option}" in a dropdown`, 'no_such_field')
+  }
+
+  /**
+   * Type into a search box and choose the suggestion that matches (Ashby and Lever location).
+   * Throws when nothing suitable is suggested, rather than leaving typed but unselected text.
+   */
+  private async pickSuggestion(
+    frame: Frame,
+    input: Locator,
+    label: string,
+    text: string,
+  ): Promise<void> {
+    await input.click()
+    await input.fill('')
+    await input.pressSequentially(text, { delay: 50 })
+    const want = text.trim().toLowerCase()
+    const candidates = frame.locator('[role=option]:visible, .dropdown-results > *:visible')
+    for (let waited = 0; waited < 5000; waited += 250) {
+      await sleep(250)
+      const texts = (await candidates.allInnerTexts()).map((t) => t.trim().toLowerCase())
+      if (texts.length === 0) continue
+      let idx = texts.findIndex((t) => t === want)
+      if (idx < 0) idx = texts.findIndex((t) => t.startsWith(want))
+      if (idx < 0) idx = texts.findIndex((t) => t.includes(want))
+      if (idx < 0) break
+      await candidates.nth(idx).click()
+      await sleep(200)
+      return
+    }
+    await input.press('Escape').catch(() => undefined)
+    throw new BrowserError(`No suggestion matched "${text}" for "${label}"`, 'no_such_field')
   }
 
   async upload(fieldId: string, filePath: string): Promise<void> {
@@ -287,6 +426,33 @@ class PlaywrightSession implements BrowserSession {
   }
 
   async screenshot(): Promise<Buffer> {
+    // When the form lives in an embedded frame (Stripe embeds Greenhouse), a full page shot often
+    // comes out blank where the frame is. Capture the frame that holds most of the fields.
+    const counts = new Map<Frame, number>()
+    for (const fr of this.fieldFrames.values()) counts.set(fr, (counts.get(fr) ?? 0) + 1)
+    const [busiest] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? []
+    if (busiest && busiest !== this.page.mainFrame() && !busiest.isDetached()) {
+      const el = await busiest.frameElement().catch(() => null)
+      // Filling scrolls the page; measure from the top so the frame's full height is known.
+      await this.page.evaluate('window.scrollTo(0, 0)').catch(() => undefined)
+      const box = el ? await el.boundingBox().catch(() => null) : null
+      if (el && box) {
+        // Chromium paints a frame only inside the viewport; a tall embedded form below the fold
+        // comes out white. Grow the viewport to fit the frame for the shot, then restore it.
+        const before = this.page.viewportSize()
+        const tall = Math.min(Math.ceil(box.y + box.height) + 20, 12_000)
+        try {
+          if (before && tall > before.height)
+            await this.page.setViewportSize({ width: before.width, height: tall })
+          await sleep(800)
+          return await el.screenshot({ type: 'png' })
+        } catch {
+          // fall back to a page shot below
+        } finally {
+          if (before) await this.page.setViewportSize(before).catch(() => undefined)
+        }
+      }
+    }
     return this.page.screenshot({ fullPage: true, type: 'png' })
   }
 

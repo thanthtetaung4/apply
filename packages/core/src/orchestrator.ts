@@ -133,7 +133,9 @@ export class Orchestrator {
    * `approveJobIds` are jobs you reviewed and want submitted now. They are applied even when the site's
    * policy is review or the gate has not been earned, because a person approved them.
    */
-  async run(options: { limit?: number; jobIds?: string[]; approveJobIds?: string[] } = {}): Promise<RunSummary> {
+  async run(
+    options: { limit?: number; jobIds?: string[]; approveJobIds?: string[] } = {},
+  ): Promise<RunSummary> {
     this.stopRequested = false
     const tailored = await this.tailorQueued()
     let ready = await this.jobs.listByStatus('ready')
@@ -176,7 +178,10 @@ export class Orchestrator {
     return path
   }
 
-  async processJob(jobId: string, opts: { approved?: boolean } = {}): Promise<'done' | 'deferred' | 'skipped'> {
+  async processJob(
+    jobId: string,
+    opts: { approved?: boolean } = {},
+  ): Promise<'done' | 'deferred' | 'skipped'> {
     const { settings } = this.d
     const job = await this.jobs.getJob(jobId)
     const app = await this.jobs.getApplication(jobId)
@@ -322,6 +327,11 @@ export class Orchestrator {
       // from nothing: an empty cookie jar would look like a connected account.
       if (key && saved && outcome.blockKind !== 'login_required') {
         await stores.sessions.put(key, await session.exportState()).catch(() => undefined)
+      }
+      // The saved sign in no longer works. Mark it once so the app asks the user to reconnect,
+      // instead of every job on this site failing on its own.
+      if (key && saved && outcome.blockKind === 'login_required') {
+        await stores.sessions.markExpired?.(key).catch(() => undefined)
       }
       return outcome
     } finally {

@@ -23,7 +23,12 @@ export const SITE_TYPES = [
 ] as const
 export type SiteType = (typeof SITE_TYPES)[number]
 
-export const JOB_SOURCES = ['indeed', 'linkedin', 'glassdoor'] as const
+/** Boards the app searches for jobs. */
+export const SEARCH_SOURCES = ['indeed', 'linkedin', 'glassdoor'] as const
+export type SearchSource = (typeof SEARCH_SOURCES)[number]
+
+/** Where a job came from: a board search, or "direct" (a link the user added). */
+export const JOB_SOURCES = [...SEARCH_SOURCES, 'direct'] as const
 export type JobSource = (typeof JOB_SOURCES)[number]
 
 export const APPLY_TARGETS = ['board_native', 'greenhouse', 'workday', 'company_site'] as const

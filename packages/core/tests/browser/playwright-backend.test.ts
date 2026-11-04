@@ -55,7 +55,7 @@ describe('PlaywrightBackend contract (Greenhouse style form)', () => {
     expect(by('Email')).toMatchObject({ type: 'email', required: true })
     expect(by('Phone')).toMatchObject({ type: 'tel', required: false })
     expect(by('Resume/CV')).toMatchObject({ type: 'file', required: true })
-    expect(by('Location (City)')).toMatchObject({ type: 'text', hint: 'combobox' })
+    expect(by('Location (City)')).toMatchObject({ type: 'text', hint: 'autocomplete' })
     expect(by('Are you legally authorized to work in Singapore?')).toMatchObject({
       type: 'select',
       options: ['Yes', 'No'],

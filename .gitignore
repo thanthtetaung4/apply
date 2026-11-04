@@ -4,9 +4,9 @@ coverage/
 .next/
 .env
 .env.local
-profile/
-output/
-sessions/
+/profile/
+/output/
+/sessions/
 ai-browser/target/
 demo-output/
 apps/web/e2e-output/

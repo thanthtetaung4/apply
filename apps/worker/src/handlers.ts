@@ -1,4 +1,4 @@
-import type { JobSource } from '@apply/core/status'
+import type { SearchSource } from '@apply/core/status'
 import { z } from 'zod'
 import { enqueueTask, isCancelRequested, type Db, type Task } from '@apply/db'
 import type { WorkerEnv } from './env'
@@ -6,6 +6,11 @@ import { buildUserEngine, type WorkerHooks } from './user-engine'
 
 const IntakePayload = z.object({
   sources: z.array(z.enum(['indeed', 'linkedin', 'glassdoor'])).optional(),
+  /** Job pages added by link. */
+  urls: z
+    .array(z.url({ protocol: /^https?$/ }).max(2000))
+    .max(20)
+    .optional(),
   dryRun: z.boolean().optional(),
   /** Queue an apply run right after, for jobs that were found. */
   thenRun: z.boolean().optional(),
@@ -37,7 +42,8 @@ export async function handleTask(
       case 'intake': {
         const p = IntakePayload.parse(task.payload)
         const summary = await ue.engine.intake({
-          sources: p.sources as JobSource[] | undefined,
+          sources: p.sources as SearchSource[] | undefined,
+          urls: p.urls,
           dryRun: p.dryRun,
         })
         if (p.thenRun && !p.dryRun && summary.queued > 0)

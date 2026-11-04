@@ -12,6 +12,7 @@
     "build": "pnpm --filter @apply/web build",
     "db:generate": "pnpm --filter @apply/db generate",
     "db:migrate": "pnpm --filter @apply/db migrate",
+    "keys:generate": "pnpm --silent --filter @apply/db keys",
     "demo": "pnpm --filter @apply/worker demo",
     "login": "pnpm --filter @apply/worker login",
     "browsers:install": "playwright-core install chromium",

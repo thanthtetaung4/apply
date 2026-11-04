@@ -15,6 +15,7 @@ import type { UserSettings } from '@apply/core/settings'
 import {
   enqueueTask,
   generateKey,
+  generateSealKeyPair,
   registerUser,
   saveProfileFile,
   saveSettings,
@@ -60,6 +61,7 @@ export async function makeWorld(
   const env = loadEnv({
     DATABASE_URL: 'test',
     APP_ENCRYPTION_KEY: key,
+    WORKER_SESSION_PRIVATE_KEY: generateSealKeyPair().privateKey,
     WORK_DIR: mkdtempSync(join(tmpdir(), 'aa-work-')),
     WORKER_CONCURRENCY: String(options.workerConcurrency ?? 2),
     POLL_MS: '200',
@@ -95,7 +97,7 @@ export async function makeWorld(
       return u
     },
     store: (u) => new PgJobStore(t.db, u.id),
-    stores: (u) => userStores(t.db, u.id, env.encryptionKey),
+    stores: (u) => userStores(t.db, u.id, env.encryptionKey, env.sessionKeys),
     async run(user, type, payload = {}) {
       await enqueueTask(t.db, user.id, type, payload)
       await world.drain()

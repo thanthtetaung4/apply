@@ -28,8 +28,30 @@ export interface RunResult<T> {
 }
 
 function stripFence(text: string): string {
+  // Some local thinking models put their reasoning inline before the JSON. Drop it.
+  text = text.replace(/^\s*<think>[\s\S]*?<\/think>/i, '')
   const m = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/.exec(text)
   return (m ? m[1]! : text).trim()
+}
+
+/**
+ * Read the JSON object in a reply. Without forced JSON mode a model may add a sentence before or
+ * after it, so fall back to the outermost {...}. Returns undefined when there is no valid object.
+ */
+export function parseJsonReply(text: string): unknown {
+  const body = stripFence(text)
+  try {
+    return JSON.parse(body)
+  } catch {
+    const start = body.indexOf('{')
+    const end = body.lastIndexOf('}')
+    if (start < 0 || end <= start) return undefined
+    try {
+      return JSON.parse(body.slice(start, end + 1))
+    } catch {
+      return undefined
+    }
+  }
 }
 
 /** The single entry point for model calls: caching, structured output, budget and accounting. */
@@ -88,10 +110,8 @@ export class LlmGateway {
       tokensIn += res.tokensIn
       tokensOut += res.tokensOut
       costUsd += res.costUsd
-      let json: unknown
-      try {
-        json = JSON.parse(stripFence(res.text))
-      } catch {
+      const json = parseJsonReply(res.text)
+      if (json === undefined) {
         problem = 'not valid JSON'
         continue
       }

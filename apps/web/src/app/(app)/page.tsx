@@ -3,18 +3,20 @@ import { listTasks } from '@apply/db'
 import { AutoRefresh } from '@/components/AutoRefresh'
 import { StartPanel } from '@/components/StartPanel'
 import { TaskPanel } from '@/components/TaskPanel'
-import { db, jobStore } from '@/lib/db'
+import { db, jobStore, stores } from '@/lib/db'
 import { profileProblem } from '@/lib/preflight'
 import { requireUser } from '@/lib/session'
 import { timeAgo } from '@/lib/format'
 
 export default async function Dashboard() {
   const user = await requireUser()
-  const [counts, tasks, problem] = await Promise.all([
+  const [counts, tasks, problem, sessions] = await Promise.all([
     jobStore(user.id).counts(),
     listTasks(db(), user.id, 6),
     profileProblem(user.id),
+    stores(user.id).sessions.list(),
   ])
+  const signedOut = sessions.filter((s) => s.status === 'expired')
   const n = (...s: string[]) =>
     counts.filter((c) => s.includes(c.status)).reduce((a, c) => a + c.n, 0)
   const tiles = [
@@ -56,6 +58,19 @@ export default async function Dashboard() {
           <p style={{ margin: '8px 0 0' }}>
             <Link className="btn" href="/profile">
               Open Profile
+            </Link>
+          </p>
+        </div>
+      )}
+
+      {signedOut.length > 0 && (
+        <div className="banner warn">
+          <strong>Sign in again to keep applying.</strong>{' '}
+          {signedOut.length === 1 ? 'One site has' : `${signedOut.length} sites have`} signed you
+          out, so jobs there are waiting.
+          <p style={{ margin: '8px 0 0' }}>
+            <Link className="btn" href="/connections">
+              Open Connections
             </Link>
           </p>
         </div>

@@ -274,3 +274,87 @@ describe('task behaviour', () => {
     }
   })
 })
+
+describe('saved sign ins', () => {
+  it('are sealed, and marked expired when the site asks to sign in again', async () => {
+    const w4 = await makeWorld()
+    try {
+      const u = await w4.addUser()
+      const stores = w4.stores(u)
+      // A sign in the site no longer accepts (wrong session cookie).
+      const host = new URL(w4.server.url).hostname
+      await stores.sessions.put('workday-meridian', {
+        cookies: [
+          {
+            name: 'wd_sid',
+            value: 'stale',
+            domain: host,
+            path: '/',
+            expires: -1,
+            httpOnly: true,
+            secure: false,
+            sameSite: 'Lax',
+          },
+        ],
+        origins: [],
+      })
+      const raw = (await w4.db.execute(
+        sql`select ciphertext from browser_sessions where user_id = ${u.id}`,
+      )) as unknown as { rows: { ciphertext: string }[] }
+      expect(raw.rows[0]!.ciphertext.startsWith('v2.')).toBe(true)
+      expect((await stores.sessions.list())[0]).toMatchObject({ status: 'connected' })
+
+      await w4.run(u, 'intake', { thenRun: true })
+      expect(await statusOf(w4, u, 'Meridian Bank')).toMatchObject({
+        status: 'needs_human',
+        reason: expect.stringContaining('Connections page'),
+      })
+      expect((await stores.sessions.list())[0]).toMatchObject({
+        key: 'workday-meridian',
+        status: 'expired',
+      })
+    } finally {
+      await w4.close()
+    }
+  })
+})
+
+describe('a model that fails while answering', () => {
+  it('leaves the question to the user instead of failing the application', async () => {
+    const w5 = await makeWorld()
+    try {
+      const { OfflineProvider } = await import('@apply/core/llm')
+      const offline = new OfflineProvider()
+      // Questions get invalid JSON (as a real local model returned on a Stripe form); everything
+      // else is answered normally.
+      w5.hooks.provider = {
+        name: 'broken',
+        complete: async (req) =>
+          req.task === 'answer_field'
+            ? { text: 'Okay, let me think...', tokensIn: 1, tokensOut: 1, costUsd: 0, model: 'x' }
+            : offline.complete(req),
+      }
+      const u = await w5.addUser()
+      await w5.run(u, 'intake', { thenRun: true })
+      expect(await statusOf(w5, u, 'NovaTech')).toMatchObject({
+        status: 'needs_human',
+        reason: expect.stringContaining('led a team through conflict'),
+      })
+      // The rest of that form was still filled and checked before it stopped.
+      const rec = JSON.parse(
+        (await w5
+          .stores(u)
+          .artifacts.get(
+            (await w5.stores(u).artifacts.list((await statusOf(w5, u, 'NovaTech'))!.jobId)).find(
+              (a) => a.kind === 'record',
+            )!.id,
+          ))!.data.toString(),
+      )
+      expect(
+        rec.outcome.fields.filter((f: { status: string }) => f.status === 'ok').length,
+      ).toBeGreaterThan(2)
+    } finally {
+      await w5.close()
+    }
+  })
+})

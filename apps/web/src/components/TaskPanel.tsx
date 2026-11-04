@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { cancelTaskAction } from '@/app/actions/tasks'
@@ -116,6 +117,7 @@ export function TaskPanel({
           {task.error}
         </p>
       )}
+      {task.status === 'succeeded' && <TaskResult type={task.type} result={task.result} />}
       <div className="log" ref={box} aria-live="polite">
         {logs.length === 0 ? (
           <span className="muted">
@@ -128,6 +130,74 @@ export function TaskPanel({
             </div>
           ))
         )}
+      </div>
+    </div>
+  )
+}
+
+const BOARD_LABEL: Record<string, string> = {
+  linkedin: 'LinkedIn',
+  indeed: 'Indeed',
+  glassdoor: 'Glassdoor',
+}
+
+/** What a finished task did, in plain words, with where to go next. */
+export function TaskResult({ type, result }: { type: string; result: unknown }) {
+  if (!result || typeof result !== 'object') return null
+  const r = result as Record<string, unknown>
+  if (type === 'intake') {
+    const needs = (r.needsSignIn as string[] | undefined) ?? []
+    const blocked = (r.blocked as string[] | undefined) ?? []
+    return (
+      <div className="banner ok" style={{ marginTop: 10 }}>
+        Found {Number(r.found ?? 0)} jobs, {Number(r.queued ?? 0)} new and worth applying to.
+        {needs.length > 0 && (
+          <p className="error" style={{ margin: '6px 0 0' }}>
+            {needs.map((n) => BOARD_LABEL[n] ?? n).join(', ')} asked you to sign in, so{' '}
+            {needs.length === 1 ? 'it was' : 'they were'} skipped.{' '}
+            <Link href="/connections">Connect on the Connections page</Link>.
+          </p>
+        )}
+        {blocked.length > 0 && (
+          <p className="error" style={{ margin: '6px 0 0' }}>
+            {blocked.map((n) => BOARD_LABEL[n] ?? n).join(', ')} blocked the app&apos;s browser with
+            bot protection, so {blocked.length === 1 ? 'it was' : 'they were'} skipped. You can turn{' '}
+            {blocked.length === 1 ? 'it' : 'them'} off under Settings, Finding jobs.
+          </p>
+        )}
+      </div>
+    )
+  }
+  const by = (r.byStatus as Record<string, number> | undefined) ?? {}
+  const n = (...keys: string[]) => keys.reduce((a, k) => a + (by[k] ?? 0), 0)
+  const submitted = n('submitted', 'submitted_unconfirmed')
+  const review = n('ready_to_submit')
+  const needsYou = n('needs_human')
+  const failed = n('failed')
+  if (Number(r.processed ?? 0) === 0 && submitted + review + needsYou + failed === 0)
+    return (
+      <p className="muted" style={{ marginTop: 10 }}>
+        Nothing was waiting to apply to. Find jobs first.
+      </p>
+    )
+  return (
+    <div className="banner ok" style={{ marginTop: 10 }}>
+      <strong>Done.</strong> {submitted} submitted, {review} waiting for your review, {needsYou}{' '}
+      need you{failed ? `, ${failed} failed` : ''}.
+      <div className="row" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+        {review > 0 && (
+          <Link className="btn" href="/jobs?status=ready_to_submit">
+            Review {review}
+          </Link>
+        )}
+        {needsYou > 0 && (
+          <Link className="btn secondary" href="/needs-you">
+            See what needs you
+          </Link>
+        )}
+        <Link className="btn secondary" href="/report">
+          Open the report
+        </Link>
       </div>
     </div>
   )
