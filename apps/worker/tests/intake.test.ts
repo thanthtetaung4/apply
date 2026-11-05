@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { sql } from 'drizzle-orm'
 import { getTask, listTasks } from '@apply/db'
-import { makeWorld, type TestWorld } from './helpers'
+import { makeWorld, statusOf, type TestWorld } from './helpers'
 
 const lastResult = async (w: TestWorld, userId: string) => (await listTasks(w.db, userId, 1))[0]!
 
@@ -64,4 +64,35 @@ describe('intake through the worker', () => {
     expect(r.perSource.linkedin!.queued + r.perSource.glassdoor!.queued).toBeGreaterThan(0)
     expect((await getTask(w.db, u.id, t.id))?.status).toBe('succeeded')
   })
+})
+
+describe('jobs added by link', () => {
+  it('reads each page, saves it as a direct job, applies, and skips a repeat', async () => {
+    const w = await makeWorld()
+    try {
+      const u = await w.addUser()
+      const urls = [
+        `${w.server.url}/co/northstar/careers/201`,
+        `${w.server.url}/gh/harborpay/jobs/102`,
+      ]
+      await w.run(u, 'intake', { urls, thenRun: true })
+      for (const c of ['Northstar Logistics', 'Harbor Pay']) {
+        const s = await statusOf(w, u, c)
+        expect(s, c).toBeTruthy()
+        expect(['submitted', 'ready_to_submit']).toContain(s!.status)
+        const job = await w.store(u).getJob(s!.jobId)
+        expect(job).toMatchObject({ source: 'direct' })
+      }
+      // Only the links were read: no board was searched.
+      expect(await statusOf(w, u, 'Lumen AI')).toBeUndefined()
+      // Adding the same link again does not add a second job.
+      await w.run(u, 'intake', { urls: [urls[0]!] })
+      const r = (await w.db.execute(
+        sql`select result from tasks where user_id = ${u.id} and type = 'intake' order by created_at desc limit 1`,
+      )) as unknown as { rows: { result: { skipped: { already_seen: number } } }[] }
+      expect(r.rows[0]!.result.skipped.already_seen).toBe(1)
+    } finally {
+      await w.close()
+    }
+  }, 180_000)
 })

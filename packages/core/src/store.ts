@@ -188,7 +188,10 @@ export interface StorageState {
 
 export interface SessionStore {
   get(key: string): Promise<StorageState | undefined>
+  /** Save a sign in. Marks it connected. */
   put(key: string, state: StorageState): Promise<void>
+  /** The site showed a sign in page with this saved session, so the user must sign in again. */
+  markExpired?(key: string): Promise<void>
 }
 
 export interface Stores {

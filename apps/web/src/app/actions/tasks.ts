@@ -149,3 +149,36 @@ export async function answerQuestionAction(_prev: FormState, fd: FormData): Prom
       : 'Saved to your answers.',
   }
 }
+
+/** Queue job pages the user pasted (company career pages, Greenhouse, Lever, Ashby). */
+export async function addLinksAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  const user = await requireUser()
+  const problem = await profileProblem(user.id)
+  if (problem) return { error: problem }
+  const lines = String(fd.get('urls') ?? '')
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const bad = lines.filter((l) => {
+    try {
+      return !/^https?:$/.test(new URL(l).protocol)
+    } catch {
+      return true
+    }
+  })
+  if (lines.length === 0) return { error: 'Paste at least one job link.' }
+  if (bad.length) return { error: 'These are not web links:', issues: bad.slice(0, 5) }
+  if (lines.length > 20) return { error: 'Add at most 20 links at a time.' }
+  const urls = [...new Set(lines)]
+  const r = await enqueueTask(db(), user.id, 'intake', {
+    urls,
+    thenRun: fd.get('thenRun') === 'on',
+  })
+  refresh()
+  return {
+    ok: true,
+    message: r.alreadyQueued
+      ? 'A search is already waiting to run. Add the links again when it finishes.'
+      : `${urls.length} link${urls.length === 1 ? '' : 's'} queued. The worker reads each job page, then applies if you chose that.`,
+  }
+}

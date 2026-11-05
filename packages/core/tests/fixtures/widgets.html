@@ -1,0 +1,223 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Application widgets</title>
+    <!--
+      Markup copied in shape from live forms on 2026-11-04: Greenhouse (react-select), Ashby
+      (location search, Yes / No buttons) and Lever (location suggestions, question cards).
+    -->
+    <style>
+      body { font: 14px sans-serif; padding: 20px; }
+      .field { margin: 14px 0; }
+      [role=listbox], .dropdown-results { border: 1px solid #999; }
+      [role=option], .dropdown-results > div { padding: 4px; cursor: pointer; }
+      button[aria-pressed=true] { background: #335; color: #fff; }
+      .hidden { display: none; }
+      .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    </style>
+  </head>
+  <body>
+    <form id="app">
+      <!-- Greenhouse: react-select. Options exist only while open; the choice shows in single-value. -->
+      <div class="field">
+        <label id="q1-label" for="q1">Will you now or in the future require sponsorship for a visa?*</label>
+        <div class="select-shell" id="q1-shell">
+          <div class="select__control">
+            <div class="select__value-container">
+              <div class="select__placeholder">Select...</div>
+              <div class="select__input-container">
+                <input class="select__input" id="q1" type="text" role="combobox" aria-haspopup="true"
+                  aria-expanded="false" aria-required="true" aria-labelledby="q1-label" autocomplete="off" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label id="q2-label" for="q2">What is your current country of residence?*</label>
+        <div class="select-shell" id="q2-shell">
+          <div class="select__control">
+            <div class="select__value-container">
+              <div class="select__placeholder">Select...</div>
+              <div class="select__input-container">
+                <input class="select__input" id="q2" type="text" role="combobox" aria-haspopup="true"
+                  aria-expanded="false" aria-required="true" aria-labelledby="q2-label" autocomplete="off" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ashby: location search, suggestions only after typing. -->
+      <div class="ashby-application-form-field-entry" data-field-path="_systemfield_location">
+        <label class="_required_x" for="_systemfield_location">Location</label>
+        <div><input id="loc" class="ashby-application-form-input-autocomplete" placeholder="Start typing..."
+          aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" role="combobox" />
+          <div id="loc-list" role="listbox" class="hidden"></div></div>
+      </div>
+
+      <!-- Ashby: Yes / No buttons. -->
+      <div class="ashby-application-form-field-entry" data-field-path="anchor-days">
+        <label class="_heading _required_x" for="anchor-days">Are you able to commit to working from one of our offices on Anchor Days each week?</label>
+        <div class="_yesno">
+          <button type="button" aria-pressed="false" data-option="yes">Yes</button>
+          <button type="button" aria-pressed="false" data-option="no">No</button>
+          <input type="checkbox" tabindex="-1" name="anchor-days" style="position:absolute;opacity:0;width:0;height:0" />
+        </div>
+      </div>
+
+      <ul>
+        <!-- Lever: location with suggestions in .dropdown-results. -->
+        <li class="application-question">
+          <label>
+            <div class="application-label">Current location <span class="required">✱</span></div>
+            <div class="application-field">
+              <input class="location-input" id="location-input" type="text" name="location" required />
+              <input id="selected-location" type="hidden" name="selectedLocation" />
+              <div class="dropdown-results"></div>
+              <div class="dropdown-no-results">No location found. Try entering a different location</div>
+            </div>
+          </label>
+        </li>
+
+        <!-- Lever: custom question card; radios are labelled only "Yes" and "No". -->
+        <li class="application-question custom-question">
+          <div>
+            <div class="application-label full-width multiple-choice">
+              <div class="text">Are you legally authorized to work in the country for which you are applying?<span class="required">✱</span></div>
+            </div>
+            <div class="application-field full-width">
+              <ul data-qa="multiple-choice">
+                <li><label><input type="radio" name="cards[abc][field0]" value="Yes" required /><span class="application-answer-alternative">Yes</span></label></li>
+                <li><label><input type="radio" name="cards[abc][field0]" value="No" required /><span class="application-answer-alternative">No</span></label></li>
+              </ul>
+            </div>
+          </div>
+        </li>
+
+        <li class="application-question custom-question">
+          <div>
+            <div class="application-label full-width textarea">
+              <div class="text">What has been your favorite project or proudest accomplishment? Why?<span class="required">✱</span></div>
+            </div>
+            <div class="application-field"><textarea class="card-field-input" name="cards[def][field0]" required></textarea></div>
+          </div>
+        </li>
+      </ul>
+
+      <!-- Greenhouse: the file input is labelled with its button word; the question is above. -->
+      <div class="field file-upload" role="group" aria-labelledby="upload-label-resume">
+        <div id="upload-label-resume" class="label">Resume/CV <span>*</span></div>
+        <div class="file-upload__wrapper"><div class="button-container"><div class="secondary-button"><div>
+          <button type="button" class="btn btn--pill">Attach</button>
+          <label class="visually-hidden" for="resume">Attach</label>
+          <input id="resume" class="visually-hidden" type="file" accept=".pdf" />
+        </div></div></div></div>
+      </div>
+
+      <!-- A normal select, to make sure nothing regressed. -->
+      <div class="field">
+        <label for="native">How did you hear about us?</label>
+        <select id="native"><option value="">Choose</option><option>LinkedIn</option><option>Company careers page</option></select>
+      </div>
+
+      <button type="submit">Submit application</button>
+    </form>
+
+    <script>
+      // react-select behaviour: open on focus or click, filter by typing, choose by click, clear the
+      // typed text on blur without choosing.
+      function reactSelect(id, options) {
+        const input = document.getElementById(id);
+        const shell = document.getElementById(id + '-shell');
+        const container = input.closest('.select__value-container');
+        const placeholder = container.querySelector('.select__placeholder');
+        let menu = null;
+        const close = () => { if (menu) { menu.remove(); menu = null; } input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-controls'); };
+        const render = () => {
+          if (!menu) {
+            menu = document.createElement('div');
+            menu.className = 'select__menu-list';
+            menu.setAttribute('role', 'listbox');
+            menu.id = id + '-listbox';
+            shell.appendChild(menu);
+            input.setAttribute('aria-expanded', 'true');
+            input.setAttribute('aria-controls', menu.id);
+          }
+          const q = input.value.toLowerCase();
+          menu.innerHTML = '';
+          options.filter((o) => o.toLowerCase().includes(q)).forEach((o) => {
+            const d = document.createElement('div');
+            d.setAttribute('role', 'option');
+            d.className = 'select__option';
+            d.textContent = o;
+            d.addEventListener('mousedown', (e) => {
+              e.preventDefault();
+              let shown = container.querySelector('.select__single-value');
+              if (!shown) { shown = document.createElement('div'); shown.className = 'select__single-value'; container.insertBefore(shown, container.firstChild); }
+              shown.textContent = o;
+              placeholder.style.display = 'none';
+              input.value = '';
+              // Like react-select: the text input is hidden once a value is chosen.
+              input.style.opacity = '0';
+              close();
+            });
+            menu.appendChild(d);
+          });
+        };
+        input.addEventListener('focus', () => { input.style.opacity = '1'; render(); });
+        input.addEventListener('click', render);
+        input.addEventListener('input', render);
+        input.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+        input.addEventListener('blur', () => { input.value = ''; close(); });
+      }
+      reactSelect('q1', ['Yes', 'No']);
+      reactSelect('q2', ['Malaysia', 'Singapore', 'Thailand', 'United States']);
+
+      // Ashby location: suggestions after typing, with a delay like a server search.
+      const loc = document.getElementById('loc');
+      const list = document.getElementById('loc-list');
+      loc.setAttribute('aria-controls', 'loc-list');
+      loc.addEventListener('input', () => {
+        const q = loc.value.toLowerCase();
+        setTimeout(() => {
+          list.innerHTML = '';
+          if (q.length < 2) { list.classList.add('hidden'); return; }
+          ['Singapore, Singapore', 'Singapore, Malaysia', 'Seoul, South Korea']
+            .filter((c) => c.toLowerCase().includes(q))
+            .forEach((c) => {
+              const d = document.createElement('div');
+              d.setAttribute('role', 'option');
+              d.textContent = c;
+              d.addEventListener('mousedown', (e) => { e.preventDefault(); loc.value = c; list.classList.add('hidden'); });
+              list.appendChild(d);
+            });
+          list.classList.toggle('hidden', list.children.length === 0);
+        }, 300);
+      });
+
+      // Ashby Yes / No: pressing one releases the other.
+      document.querySelectorAll('._yesno button').forEach((b) => b.addEventListener('click', () => {
+        b.parentElement.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      }));
+
+      // Lever location: suggestions in .dropdown-results after typing.
+      const lev = document.getElementById('location-input');
+      const res = lev.parentElement.querySelector('.dropdown-results');
+      lev.addEventListener('input', () => {
+        const q = lev.value.toLowerCase();
+        setTimeout(() => {
+          res.innerHTML = '';
+          ['Singapore', 'Singapore River, Singapore'].filter((c) => q.length > 1 && c.toLowerCase().startsWith(q)).forEach((c) => {
+            const d = document.createElement('div');
+            d.textContent = c;
+            d.addEventListener('click', () => { lev.value = c; document.getElementById('selected-location').value = c; res.innerHTML = ''; });
+            res.appendChild(d);
+          });
+        }, 300);
+      });
+    </script>
+  </body>
+</html>

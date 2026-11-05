@@ -19,14 +19,31 @@ const EEO_LABEL =
   /gender|race|ethnic|veteran|disabilit|pronoun|sexual orientation|religio|self[- ]identif/i
 const EEO_SECTION = /voluntary|self[- ]identif|equal (employment|opportunity)|diversity|eeo/i
 
+/**
+ * A screening question rather than a field name: ends in "?" or starts like a question.
+ * Required markers (*, ✱) are ignored.
+ */
+export function isQuestion(label: string): boolean {
+  const l = label.replace(/[*✱]/g, '').trim().toLowerCase()
+  return (
+    l.endsWith('?') ||
+    /^(are|is|do|does|did|will|would|have|has|had|can|could|should|what|which|when|where|why|how|please)\b/.test(
+      l,
+    )
+  )
+}
+
 /** Choose the option that best matches an answer: exact, then contained. */
 export function pickOption(options: string[], answer: string): string | null {
   const want = answer.trim().toLowerCase()
-  return (
-    options.find((o) => o.toLowerCase() === want) ??
-    options.find((o) => o.toLowerCase().startsWith(want) && want.length >= 2) ??
-    null
-  )
+  const exact = options.find((o) => o.toLowerCase() === want)
+  if (exact) return exact
+  if (want.length < 2) return null
+  // A partial match only counts when it is the only one. On a real GitLab form "Yes" started
+  // six options ("Yes, Netherlands Highly Skilled Migrant Visa", "Yes, EU Blue Card", ...);
+  // taking the first would have claimed a visa the candidate does not have.
+  const starts = options.filter((o) => o.toLowerCase().startsWith(want))
+  return starts.length === 1 ? starts[0]! : null
 }
 
 function link(profile: Profile, re: RegExp): string | undefined {
@@ -45,6 +62,8 @@ export function mapField(field: FormField, ctx: MapContext): Mapping {
   const rule = (value: FieldValue): Mapping => ({ kind: 'fill', value, source: 'rule' })
 
   if (field.type === 'file') {
+    // "Autofill from resume" (Ashby) only re-reads the resume and overwrites fields; skip it.
+    if (/auto-?fill|autocomplete|parse/.test(label)) return { kind: 'skip', reason: 'autofill box' }
     if (/resume|cv|curriculum/.test(label)) return rule(ctx.resumePath)
     return field.required ? { kind: 'unresolved' } : { kind: 'skip', reason: 'optional file' }
   }
@@ -80,14 +99,24 @@ export function mapField(field: FormField, ctx: MapContext): Mapping {
     const u = link(profile, /github/i)
     if (u) return rule(u)
   }
-  if (/website|portfolio|personal (site|page)/.test(label)) {
+  // The next rules match common words, so they apply only to plain field names ("City",
+  // "Current company"), never to questions that happen to contain those words. On a real
+  // Greenhouse form, "Will you require sponsorship ... in your current location?" was answered
+  // "Singapore" and "Are you subject to agreements with your current employer?" with a company.
+  const question = isQuestion(label)
+  if (!question && /website|portfolio|personal (site|page)/.test(label)) {
     const u = link(profile, /portfolio|website|personal/i) ?? link(profile, /github/i)
     if (u) return rule(u)
   }
-  if (/\b(city|location)\b|where are you (based|located)/.test(label) && c.location) {
+  if (
+    ((!question && /\b(city|location)\b/.test(label)) ||
+      /^where are you (currently )?(based|located)\b/.test(label)) &&
+    c.location
+  ) {
     return rule(c.location.split(',')[0]!.trim())
   }
-  if (/current (company|employer)/.test(label)) return rule(profile.experience[0]!.company)
+  if (!question && /current (company|employer)/.test(label))
+    return rule(profile.experience[0]!.company)
 
   // Answer bank, for screening questions.
   const hit = profile.answerBank.match(field.label)

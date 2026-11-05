@@ -8,6 +8,8 @@ import { chromium, type Page } from 'playwright-core'
 import { resolveChromium } from '@apply/core/browser'
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3100'
+/** The demo's fictional job sites (`pnpm demo`). */
+const MOCK = process.env.MOCK_URL ?? 'http://127.0.0.1:4010'
 const OUT = process.env.E2E_OUT ?? 'e2e-output'
 mkdirSync(OUT, { recursive: true })
 
@@ -80,6 +82,10 @@ async function main() {
   await shot(page, '03-dashboard-after')
   const dash = await text()
   check(/Need you/.test(dash), 'dashboard shows the Need you tile')
+  check(
+    dash.includes('submitted') && dash.includes('Open the report'),
+    'the finished run shows a summary with a link to the report',
+  )
 
   // --- jobs list and detail --------------------------------------------------------------
   await page.goto(`${BASE}/jobs`)
@@ -216,14 +222,18 @@ async function main() {
     (await page.inputValue('select[name="sites.workday.submit"]')) === 'manual',
     'settings persist',
   )
-  await page.fill('input[name="gate.minAccuracy"]', '150')
+  await page.fill('input[name="pacing.minDelayMs"]', '20')
+  await page.fill('input[name="pacing.maxDelayMs"]', '5')
   await page.getByRole('button', { name: 'Save settings' }).click()
   await page.waitForSelector('text=Some settings are not valid')
   check(
-    (await text()).includes('gate.minAccuracy'),
+    (await text()).includes('Longest pause'),
     'invalid settings are rejected with the field name',
   )
+  await page.fill('input[name="pacing.minDelayMs"]', '2')
+  await page.fill('input[name="pacing.maxDelayMs"]', '6')
   await page.selectOption('select[name="sites.workday.submit"]', 'review')
+  await page.click('summary:has-text("Advanced")')
   await page.fill('input[name="gate.minAccuracy"]', '90')
   await page.getByRole('button', { name: 'Save settings' }).click()
   await page.waitForSelector('text=Settings saved')
@@ -231,6 +241,7 @@ async function main() {
 
   // --- connections: token, session upload, secrets ---------------------------------------
   await page.goto(`${BASE}/connections`)
+  await page.click('summary:has-text("For developers")')
   await page.fill('input[name=name]', 'e2e laptop')
   await page.getByRole('button', { name: 'Create token' }).click()
   await page.waitForSelector('pre[aria-label="New token"]')
@@ -281,6 +292,86 @@ async function main() {
   )
   check((await text()).includes('saved'), 'the page says the model key is saved')
   await shot(page, '10-connections')
+
+  // --- sign in window: connect the demo Workday company with mouse and keyboard ---------
+  await page.goto(`${BASE}/connections`)
+  await page.getByRole('button', { name: 'Connect a company' }).click()
+  await page.fill('#wd-link', `${MOCK}/wd/meridian/job/301`)
+  await page.getByRole('button', { name: 'Open sign in' }).click()
+  const screenImg = page.locator('.signin-screen img')
+  await waitFor(
+    async () => (await screenImg.evaluate((i) => (i as HTMLImageElement).naturalWidth)) > 0,
+    'the sign in window shows the page',
+    60_000,
+  )
+  check(true, 'the sign in window streams the site')
+  await shot(page, '12-signin-window')
+  // Where the email field is on the 1280x800 page, measured on a copy of the same page.
+  const probe = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+  await probe.goto(`${MOCK}/wd/meridian/job/301`)
+  const field = (await probe.locator('#u').boundingBox())!
+  await probe.close()
+  const box = (await screenImg.boundingBox())!
+  await page.mouse.click(
+    box.x + ((field.x + field.width / 2) * box.width) / 1280,
+    box.y + ((field.y + field.height / 2) * box.height) / 800,
+  )
+  await page.keyboard.type('alex@example.com')
+  await page.keyboard.press('Tab')
+  await page.keyboard.type('pw')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(2500)
+  await page.getByRole('button', { name: "I'm signed in" }).click()
+  await page.waitForSelector('text=Workday is connected')
+  check(true, 'signing in through the window saves the session')
+  await page.reload()
+  check(
+    /Workday: meridian connected/.test(await text()),
+    'the company shows as connected on the Connections page',
+  )
+  // The worker can use what the window saved: the parked Workday job now goes through.
+  await page.goto(`${BASE}/needs-you`)
+  const meridian = page
+    .locator('div', { has: page.getByRole('link', { name: 'Meridian Bank' }) })
+    .filter({ has: page.getByRole('button', { name: 'Retry' }) })
+    .last()
+  await meridian.getByRole('button', { name: 'Retry' }).click()
+  await waitFor(async () => {
+    await page.goto(`${BASE}/jobs?status=ready_to_submit`)
+    return (await text()).includes('Meridian Bank')
+  }, 'the Workday job reaches review with the new sign in')
+  check(true, 'the worker applies with the session saved by the sign in window')
+
+  // --- files -----------------------------------------------------------------------------
+  page.on('dialog', (d) => void d.accept())
+  await page.goto(`${BASE}/files`)
+  const ft = await text()
+  check(
+    ft.includes('Tailored resume') && ft.includes('Screenshot') && ft.includes('resume.md'),
+    'the files page lists generated files and profile files',
+  )
+  await shot(page, '13-files')
+  const md = await page.evaluate(async () => (await fetch('/api/profile/resume')).text())
+  check(md.includes('# Profile'), 'a profile file downloads as Markdown')
+  await page.getByRole('link', { name: 'Tailored resumes' }).click()
+  await page.waitForURL(/kind=resume_pdf/)
+  const kinds = await page.locator('tbody .chip').allInnerTexts()
+  check(kinds.length > 0 && kinds.every((k) => k === 'Tailored resume'), 'files filter by type')
+  const dl = await page.evaluate(async () => {
+    const a = document.querySelector<HTMLAnchorElement>('a[href$="?download=1"]')
+    const r = await fetch(a!.href)
+    return r.headers.get('content-disposition') ?? ''
+  })
+  check(dl.startsWith('attachment'), 'a file downloads as an attachment')
+  await page.locator('tbody input[type=checkbox]').first().check()
+  await page.getByRole('button', { name: /Delete selected/ }).click()
+  await page.waitForSelector('text=Deleted 1 file')
+  check(true, 'a selected file is deleted')
+  await page.goto(`${BASE}/files`)
+  await page.selectOption('#days', '0')
+  await page.getByRole('button', { name: 'Delete screenshots' }).click()
+  await page.waitForSelector('text=/Deleted \\d+ screenshot/')
+  check(true, 'old screenshots can be cleaned up')
 
   // --- report ----------------------------------------------------------------------------
   await page.goto(`${BASE}/report`)

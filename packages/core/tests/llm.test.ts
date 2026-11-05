@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { MemoryLlmStore } from './helpers/memory-llm-store'
-import { LlmGateway } from '../src/llm/gateway'
+import { LlmGateway, parseJsonReply } from '../src/llm/gateway'
 import { OfflineProvider } from '../src/llm/offline'
 import { OpenRouterProvider } from '../src/llm/openrouter'
 import { answerField } from '../src/llm/tasks'
@@ -176,5 +176,67 @@ describe('OpenRouterProvider', () => {
 
   it('requires an API key', () => {
     expect(() => new OpenRouterProvider({ apiKey: '' })).toThrow(/OPENROUTER_API_KEY/)
+  })
+})
+
+describe('local model servers', () => {
+  const ok = (content: string) =>
+    new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 })
+  const req = { task: 'answer_field' as const, model: 'qwen3:4b', system: '', prompt: '{}' }
+
+  it('can drop JSON mode, add body fields, and names itself in errors', async () => {
+    const f = vi.fn(async (_url: unknown, _init: unknown) => ok('{"answer":"No"}'))
+    const p = new OpenRouterProvider({
+      apiKey: 'local',
+      baseUrl: 'http://localhost:11434/v1',
+      name: 'local',
+      jsonMode: false,
+      extraBody: { reasoning_effort: 'low' },
+      fetch: f as unknown as typeof fetch,
+    })
+    expect(p.name).toBe('local')
+    await p.complete(req)
+    const [url, init] = f.mock.calls[0]! as [string, RequestInit]
+    expect(url).toBe('http://localhost:11434/v1/chat/completions')
+    const body = JSON.parse(init.body as string)
+    expect(body.response_format).toBeUndefined()
+    expect(body.reasoning_effort).toBe('low')
+
+    const down = new OpenRouterProvider({
+      apiKey: 'local',
+      name: 'local',
+      maxRetries: 0,
+      fetch: (async () => new Response('', { status: 404 })) as unknown as typeof fetch,
+    })
+    await expect(down.complete(req)).rejects.toThrow('Model server (local) returned 404')
+  })
+
+  it('reads JSON wrapped in think tags, fences or a sentence', () => {
+    expect(parseJsonReply('<think>2 weeks is less than 3 months</think>\n{"answer":"No"}')).toEqual(
+      {
+        answer: 'No',
+      },
+    )
+    expect(parseJsonReply('```json\n{"answer":"No"}\n```')).toEqual({ answer: 'No' })
+    expect(parseJsonReply('Here is the answer: {"answer":"No"} Hope that helps.')).toEqual({
+      answer: 'No',
+    })
+    expect(parseJsonReply('Okay, let me think about this.')).toBeUndefined()
+  })
+
+  it('validates the reply even without JSON mode, so an echoed input fails closed', async () => {
+    const echo = vi.fn(async () => reply('{"question":"Will you require visa sponsorship?"}'))
+    const gw = new LlmGateway({ provider: { name: 'local', complete: echo }, models })
+    await expect(
+      answerField(gw, {
+        question: 'Will you require visa sponsorship?',
+        type: 'select',
+        options: ['Yes', 'No'],
+        required: true,
+        job: { title: 't', company: 'c' },
+        facts: {},
+      }),
+    ).rejects.toThrow(/invalid after a retry/)
+    expect(echo).toHaveBeenCalledTimes(2)
   })
 })

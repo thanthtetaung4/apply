@@ -7,6 +7,7 @@ import {
 } from '../browser/types'
 import type { LlmGateway } from '../llm/gateway'
 import { answerField } from '../llm/tasks'
+import { LlmError } from '../llm/types'
 import type { Profile } from '../profile'
 import type { Job } from '../shared/job'
 import { valuesMatch } from '../verify/compare'
@@ -115,7 +116,20 @@ export async function runApply(session: BrowserSession, ctx: ApplyContext): Prom
     return done('needs_human', { blockKind, reason })
   }
 
+  // Many application pages build the form with JavaScript after load (Ashby took about 3 seconds
+  // on a real Airwallex posting). Wait for fields, a button, or a block before deciding.
+  const waitForForm = async () => {
+    for (let i = 0; i < 10; i++) {
+      const s = await session.formSchema()
+      if (s.fields.length > 0 || s.actions.some((a) => a.kind === 'open' || a.kind === 'submit'))
+        return
+      if (recipe.detectBlock(await session.snapshot(), s)) return
+      await new Promise((r) => setTimeout(r, 1000))
+    }
+  }
+
   await session.open(job.applyUrl)
+  await waitForForm()
 
   for (let guard = 0; guard < (ctx.maxSteps ?? 15); guard++) {
     let schema = await session.formSchema()
@@ -142,6 +156,7 @@ export async function runApply(session: BrowserSession, ctx: ApplyContext): Prom
         const open = schema.actions.find((a) => a.kind === 'open')
         if (open && opens++ < 3) {
           await session.click(open.id)
+          await waitForForm()
           continue
         }
         return park('no_form', 'No application form was found on the page.')
@@ -154,9 +169,11 @@ export async function runApply(session: BrowserSession, ctx: ApplyContext): Prom
 
       // 1. Uploads first. Some sites parse the resume and overwrite other fields afterwards.
       let uploaded = false
+      const uploads: FormField[] = []
       for (const f of schema.fields.filter((x) => x.type === 'file')) {
         const m = mapField(f, ctx)
         if (m.kind === 'fill' && typeof m.value === 'string') {
+          uploads.push(f)
           if (String(f.value ?? '') !== fileNameOf(m.value)) {
             await session.upload(f.id, m.value)
             uploaded = true
@@ -204,6 +221,9 @@ export async function runApply(session: BrowserSession, ctx: ApplyContext): Prom
       // 3. Ask the model about required questions nothing else covers.
       const stillUnknown: FormField[] = []
       for (const f of unresolved) {
+        // A model that fails (bad output, timeout, budget) leaves the question to the user, like
+        // any other unknown. On a real Stripe form, invalid JSON from a local model failed the
+        // whole application instead.
         const res = await answerField(
           ctx.gateway,
           {
@@ -224,8 +244,11 @@ export async function runApply(session: BrowserSession, ctx: ApplyContext): Prom
             },
           },
           { jobId: job.id },
-        )
-        const value = res.answer
+        ).catch((err: unknown) => {
+          if (err instanceof LlmError) return null
+          throw err
+        })
+        const value = res?.answer
           ? f.options
             ? pickOption(f.options, res.answer)
             : res.answer
@@ -248,19 +271,22 @@ export async function runApply(session: BrowserSession, ctx: ApplyContext): Prom
             status: 'unresolved',
           })
         }
-        return park('unknown_question', `Needs an answer for: ${unknownQuestions.join(' | ')}`)
       }
+      // Questions nobody could answer stop the job, but only after everything else is filled and
+      // checked. Parking first left a blank form on a real Airwallex posting, so the screenshot
+      // and the job page could not show what the app would have sent.
+      const parkForQuestions = stillUnknown.length > 0
 
-      // 4. Fill.
+      // 4. Fill. A field that cannot be filled does not stop the others; the step parks after
+      // everything else is filled and checked, so the user sees the real state of the form.
+      const fillFailures: string[] = []
       for (const p of plan) {
         if (valuesMatch(p.field.type, p.value, p.field.value)) continue
         try {
           await session.fill(p.field.id, p.value)
         } catch (err) {
-          if (err instanceof BrowserError) {
-            return park('fill_failed', `Could not fill "${p.field.label}": ${err.message}`)
-          }
-          throw err
+          if (!(err instanceof BrowserError)) throw err
+          fillFailures.push(`Could not fill "${p.field.label}": ${err.message}`)
         }
       }
 
@@ -288,17 +314,21 @@ export async function runApply(session: BrowserSession, ctx: ApplyContext): Prom
           status: ok ? 'ok' : 'mismatch',
         })
       }
-      // Required fields that stayed empty (for example a file the site rejected) also fail.
-      for (const f of schema.fields.filter((x) => x.type === 'file' && x.required)) {
+      // File fields: every one that should hold the resume (optional ones too, so the record
+      // shows it was attached), and every required one. Empty required files fail the step.
+      const fileFields = schema.fields.filter(
+        (x) => x.type === 'file' && (x.required || mapField(x, ctx).kind === 'fill'),
+      )
+      for (const f of fileFields) {
         const v = actual[f.id]
         if (!v) {
-          stepVerify = 'fail'
+          stepVerify = worse(stepVerify, f.required ? 'fail' : 'warn')
           fields.push({
             step: stepNo,
             id: f.id,
             label: f.label,
             type: f.type,
-            required: true,
+            required: f.required,
             intended: ctx.resumePath,
             actual: v,
             source: 'rule',
@@ -311,7 +341,7 @@ export async function runApply(session: BrowserSession, ctx: ApplyContext): Prom
             id: f.id,
             label: f.label,
             type: f.type,
-            required: true,
+            required: f.required,
             intended: ctx.resumePath,
             actual: v,
             source: 'rule',
@@ -319,8 +349,38 @@ export async function runApply(session: BrowserSession, ctx: ApplyContext): Prom
           })
         }
       }
+      // Uploads whose input the site replaced with its own "file name, remove" display
+      // (Greenhouse does). The file counts as attached when the page shows its name.
+      const gone = uploads.filter((u) => !schema.fields.some((f) => f.id === u.id))
+      if (gone.length > 0) {
+        const pageText = (await session.snapshot()).text
+        for (const f of gone) {
+          const name = fileNameOf(ctx.resumePath)
+          const shown = pageText.includes(name)
+          if (!shown) stepVerify = worse(stepVerify, f.required ? 'fail' : 'warn')
+          fields.push({
+            step: stepNo,
+            id: f.id,
+            label: f.label,
+            type: f.type,
+            required: f.required,
+            intended: ctx.resumePath,
+            actual: shown ? name : undefined,
+            source: 'rule',
+            status: shown ? 'ok' : 'mismatch',
+            note: shown ? 'attached; the site shows the file name' : 'no file attached',
+          })
+        }
+      }
       verify = worse(verify, stepVerify)
       await shot(`step-${stepNo}.png`)
+
+      if (parkForQuestions)
+        return park(
+          'unknown_question',
+          [`Needs an answer for: ${unknownQuestions.join(' | ')}`, ...fillFailures].join('\n'),
+        )
+      if (fillFailures.length > 0) return park('fill_failed', fillFailures.join('\n'))
 
       if (stepVerify === 'fail') {
         const first = bad.find((p) => p.field.required)

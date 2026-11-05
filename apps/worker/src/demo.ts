@@ -28,6 +28,7 @@ import {
 } from '@apply/db'
 import { eq } from 'drizzle-orm'
 import { loadEnv } from './env'
+import { startLoginServer } from './login-server'
 import { startWorker } from './worker'
 
 const EMAIL = 'demo@example.com'
@@ -81,7 +82,7 @@ async function main() {
     await s.fill(wall.fields.find((f) => f.type === 'email')!.id, EMAIL)
     await s.fill(wall.fields.find((f) => f.type === 'password')!.id, 'demo')
     await s.click(wall.actions.find((a) => a.label === 'Sign In')!.id)
-    await userStores(db, user.id, env.encryptionKey).sessions.put(
+    await userStores(db, user.id, env.encryptionKey, env.sessionKeys).sessions.put(
       'workday-meridian',
       await s.exportState(),
     )
@@ -106,7 +107,7 @@ async function main() {
   if (args.includes('--run')) {
     await enqueueTask(db, user.id, 'intake', { thenRun: true })
     await worker.idle()
-    const store = userStores(db, user.id, env.encryptionKey).jobs
+    const store = userStores(db, user.id, env.encryptionKey, env.sessionKeys).jobs
     say('\n' + renderReportText(await buildReport(store, await getSettings(db, user.id))))
     say(`\nBoard (mock, over MCP) holds ${board.apps.length} applications.`)
     await worker.stop()
@@ -116,9 +117,22 @@ async function main() {
     return
   }
 
+  // Sign in windows, allowed to open the mock sites too (for the demo Workday company).
+  const login = await startLoginServer(
+    db,
+    {
+      ...env,
+      LOGIN_EXTRA_HOSTS: [...env.LOGIN_EXTRA_HOSTS, new URL(server.url).hostname],
+    },
+    { log: (l) => say(`[signin] ${l}`) },
+  )
+  say(`Sign in windows on port ${login.port}`)
+  say(`Demo Workday job link for Connections: ${server.url}/wd/meridian/job/301`)
+
   say(`\nDemo account: ${EMAIL} / ${PASSWORD}`)
   say('Open the web app, sign in, and press "Find jobs". Press Ctrl+C here to stop.\n')
   const stop = async () => {
+    await login.close()
     await worker.stop()
     await board.close()
     await server.close()

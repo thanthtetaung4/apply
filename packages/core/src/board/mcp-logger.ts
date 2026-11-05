@@ -29,6 +29,7 @@ const SOURCE_LABEL: Record<JobSource, 'Indeed' | 'LinkedIn' | 'Other'> = {
   indeed: 'Indeed',
   linkedin: 'LinkedIn',
   glassdoor: 'Other',
+  direct: 'Other',
 }
 
 function roleFamily(title: string): string {

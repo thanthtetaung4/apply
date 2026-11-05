@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { createDb } from '@apply/db'
 import { loadEnv } from './env'
+import { startLoginServer } from './login-server'
 import { startWorker } from './worker'
 
 if (existsSync('.env')) process.loadEnvFile('.env')
@@ -10,12 +11,15 @@ const log = (line: string) => console.log(`${new Date().toISOString()} ${line}`)
 
 log(`${env.workerId} starting (concurrency ${env.WORKER_CONCURRENCY}, work dir ${env.WORK_DIR})`)
 const worker = startWorker(handle.db, env, { log })
+const login = await startLoginServer(handle.db, env, { log })
+log(`sign in windows on port ${login.port} for ${env.LOGIN_ALLOWED_ORIGINS.join(', ')}`)
 
 let closing = false
 const shutdown = async (signal: string) => {
   if (closing) return
   closing = true
   log(`${signal} received, finishing running tasks`)
+  await login.close()
   await worker.stop()
   await handle.close()
   process.exit(0)

@@ -22,5 +22,14 @@ export function valuesMatch(
   intended: FieldValue,
   actual: FieldValue | undefined,
 ): boolean {
-  return normalizeValue(type, intended) === normalizeValue(type, actual)
+  const want = normalizeValue(type, intended)
+  const got = normalizeValue(type, actual)
+  if (want === got) return true
+  // A picked suggestion may add detail: "Singapore" becomes "Singapore, Singapore" or
+  // "Singapore (SG)". Only extra detail after a comma or bracket counts, never a different value.
+  if (type === 'text' && want !== '' && (got.startsWith(`${want},`) || got.startsWith(`${want} (`)))
+    return true
+  // Phone country pickers show only the dialling code of the chosen country: "Singapore +65"
+  // reads back as "+65" (seen on a real Greenhouse form).
+  return type === 'select' && /^\+\d{1,4}$/.test(got) && want.endsWith(got)
 }

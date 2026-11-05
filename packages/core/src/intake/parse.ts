@@ -55,9 +55,31 @@ export function parseJobPage(html: string, pageUrl: string): ParsedJob {
   const og = root.querySelector('meta[property="og:title"]')?.getAttribute('content')
   const org = posting?.hiringOrganization as Json | string | undefined
   const title = (posting?.title as string | undefined) ?? (h1 || og || '')
+  // Boards often name the company only in the page title, e.g. LinkedIn's
+  // "AI Engineer at Arros AI — Singapore | LinkedIn Jobs".
+  const pageTitle = clean(root.querySelector('title')?.textContent ?? og ?? '')
+  // Or "Job title | Company" / "Job title - Company", when the first part really is the job title.
+  const parts = pageTitle.split(/\s+[|–—-]\s+/)
+  const titleThenCompany =
+    parts.length === 2 && title && parts[0]!.toLowerCase() === clean(title).toLowerCase()
+      ? parts[1]!
+      : ''
+  const siteName = clean(
+    root.querySelector('meta[property="og:site_name"]')?.getAttribute('content') ?? '',
+  )
+  // "Northstar Logistics careers", "Acme Jobs": the company is the part before the word.
+  const fromTitle = (
+    /^.+? at (.+?)(?: [—–-] .*)?(?: \| .*)?$/.exec(pageTitle)?.[1]?.trim() ||
+    titleThenCompany ||
+    siteName
+  ).replace(/\s+(careers?|jobs|job board|hiring)$/i, '')
   const company =
     (typeof org === 'string' ? org : (org?.name as string | undefined)) ??
-    clean(root.querySelector('.company, [data-company-name]')?.textContent ?? '')
+    (clean(
+      root.querySelector('.company, [data-company-name], .topcard__org-name-link')?.textContent ??
+        '',
+    ) ||
+      fromTitle)
   const description = posting?.description
     ? stripTags(String(posting.description))
     : clean(root.querySelector('main')?.textContent ?? root.textContent).slice(0, 6000)

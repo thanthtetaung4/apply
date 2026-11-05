@@ -69,11 +69,15 @@ export async function buildUserEngine(
     for (const site of Object.values(settings.sites)) site.headless = true
   }
 
-  const stores = userStores(db, userId, env.encryptionKey)
+  const stores = userStores(db, userId, env.encryptionKey, env.sessionKeys)
 
+  const local = localModel(env)
+  if (local?.models) settings.llm.models = local.models
   const apiKey = await getSecret(db, env.encryptionKey, userId, SECRET_NAMES.openrouterKey)
   const provider =
-    hooks.provider ?? (apiKey ? new OpenRouterProvider({ apiKey }) : new OfflineProvider())
+    hooks.provider ??
+    local?.provider ??
+    (apiKey ? new OpenRouterProvider({ apiKey }) : new OfflineProvider())
 
   let board: BoardLogger = new NoopBoardLogger()
   const injected = hooks.boardFor?.(userId, stores)
@@ -121,4 +125,49 @@ export async function buildUserEngine(
     shouldStop: () => isCancelRequested(db, taskId),
   })
   return { engine, stores, profileFiles: files, close: () => engine.close() }
+}
+
+/**
+ * The local model server from LLM_BASE_URL (Ollama, LM Studio, llama.cpp), or undefined.
+ * For testing on one machine: it applies to every user and replaces their saved OpenRouter key.
+ */
+export function localModel(
+  env: Pick<
+    WorkerEnv,
+    | 'LLM_BASE_URL'
+    | 'LLM_API_KEY'
+    | 'LLM_MODEL'
+    | 'LLM_THINK_TASKS'
+    | 'LLM_TIMEOUT_MS'
+    | 'LLM_MAX_TOKENS'
+  >,
+): { provider: LlmProvider; models?: { cheap: string; mid: string; strong: string } } | undefined {
+  if (!env.LLM_BASE_URL) return undefined
+  const think = new Set(env.LLM_THINK_TASKS)
+  // With an empty list the model is treated as one without thinking: no reasoning field is sent,
+  // because Ollama refuses it for models that cannot think.
+  const thinkingModel = think.size > 0
+  const tasks = ['extract_requirements', 'answer_field', 'rephrase_bullet'] as const
+  const provider = new OpenRouterProvider({
+    apiKey: env.LLM_API_KEY || 'local',
+    baseUrl: env.LLM_BASE_URL.replace(/\/$/, ''),
+    name: 'local',
+    timeoutMs: env.LLM_TIMEOUT_MS,
+    // A timed out local call is retried once, not three times: each try can take minutes.
+    maxRetries: 1,
+    extraBody: { max_tokens: env.LLM_MAX_TOKENS },
+    perTask: Object.fromEntries(
+      tasks.map((t) => [
+        t,
+        think.has(t)
+          ? { jsonMode: false }
+          : {
+              jsonMode: true,
+              extraBody: thinkingModel ? { reasoning_effort: 'none' } : undefined,
+            },
+      ]),
+    ),
+  })
+  const m = env.LLM_MODEL
+  return { provider, models: m ? { cheap: m, mid: m, strong: m } : undefined }
 }

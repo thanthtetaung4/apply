@@ -153,10 +153,17 @@ export const browserSessions = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     key: text('key').notNull(), // indeed | linkedin | glassdoor | workday-<tenant>
+    /** v2: sealed to the worker's public key (see sealed.ts). v1: legacy app key encryption. */
     ciphertext: text('ciphertext').notNull(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
+    /** "connected", or "expired" once the worker met a sign in page with this session. */
+    status: text('status').notNull().default('connected'),
+    statusAt: ts('status_at').notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.key] })],
+  (t) => [
+    primaryKey({ columns: [t.userId, t.key] }),
+    check('browser_sessions_status_ck', inList(t.status, ['connected', 'expired'])),
+  ],
 )
 
 export const jobs = pgTable(

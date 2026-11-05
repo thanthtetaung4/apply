@@ -25,6 +25,9 @@ export function classifyApplyTarget(
   const host = url.hostname.toLowerCase()
   if (host.endsWith('greenhouse.io')) return 'greenhouse'
   if (host.includes('myworkdayjobs.com') || host.endsWith('workday.com')) return 'workday'
-  if (host === boardHost.toLowerCase()) return 'board_native'
+  // The board itself, including its country subdomains: job links from www.linkedin.com search
+  // point at sg.linkedin.com.
+  const board = boardHost.toLowerCase().replace(/^www\./, '')
+  if (host === board || host.endsWith(`.${board}`)) return 'board_native'
   return 'company_site'
 }

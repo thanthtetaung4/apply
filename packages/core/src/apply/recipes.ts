@@ -30,16 +30,38 @@ const CONFIRMATION =
   /thank you for (applying|your application|submitting)|application (has been )?(submitted|received|sent)|successfully (submitted|applied)|we(?:'ve| have) received your application/i
 const OVERLAY = /^(accept( all)?( cookies)?|i agree|got it|allow all( cookies)?)$/i
 
+const BLOCKED_TEXT =
+  /you have been blocked|request blocked|humans only|unusual traffic|verify you are human|are you a robot|access denied/i
+
+/**
+ * A bot protection page instead of the real one (Cloudflare and similar), as seen on Indeed
+ * ("Request Blocked") and Glassdoor ("Just a moment... Humans only"). We report these and stop;
+ * we do not try to get past them.
+ */
+export function isBlockedPage(snap: Pick<PageSnapshot, 'title' | 'text'>): boolean {
+  return (
+    /^just a moment|blocked|attention required/i.test(snap.title) ||
+    BLOCKED_TEXT.test(snap.text.slice(0, 2000))
+  )
+}
+
+/** A form that only asks for a sign in: a password plus email or user name fields. */
+export function isSignInForm(schema: FormSchema): boolean {
+  return (
+    schema.fields.some((f) => f.type === 'password') &&
+    schema.fields.every((f) => f.type === 'password' || /e-?mail|user ?name|login/i.test(f.label))
+  )
+}
+
 function genericBlock(snap: PageSnapshot, schema: FormSchema): Block | null {
-  if (CAPTCHA.test(snap.text)) {
+  if (CAPTCHA.test(snap.text) || isBlockedPage(snap)) {
     return { kind: 'captcha', message: 'The page asks to verify you are human. Apply by hand.' }
   }
-  const hasPassword = schema.fields.some((f) => f.type === 'password')
-  if (
-    hasPassword &&
-    schema.fields.every((f) => f.type === 'password' || /e-?mail|user ?name|login/i.test(f.label))
-  ) {
-    return { kind: 'login_required', message: 'The site asks you to sign in.' }
+  if (isSignInForm(schema)) {
+    return {
+      kind: 'login_required',
+      message: 'The site asks you to sign in. Connect your account on the Connections page.',
+    }
   }
   if (
     /^(404|page not found|not found)/i.test(snap.title) ||
@@ -91,7 +113,7 @@ export const RECIPES: Record<SiteType, Recipe> = {
         ? {
             kind: 'login_required',
             message:
-              'Workday needs a saved sign in for this company. Run: pnpm cli login workday <url>',
+              'Workday needs you to sign in for this company. Connect it on the Connections page with this job link.',
           }
         : b
     },
@@ -104,7 +126,10 @@ export const RECIPES: Record<SiteType, Recipe> = {
 /** The site type decides the recipe, the config block, the daily cap and the metrics group. */
 export function siteTypeOf(job: Pick<Job, 'applyTarget' | 'source'>): SiteType {
   const t: ApplyTarget = job.applyTarget
-  return t === 'board_native' ? job.source : t
+  // A board-native job is applied to on the board it came from. A link the user added ("direct")
+  // is never board native; treat it as a company site if it ever claims to be.
+  if (t === 'board_native') return job.source === 'direct' ? 'company_site' : job.source
+  return t
 }
 
 export const pickRecipe = (job: Pick<Job, 'applyTarget' | 'source'>): Recipe =>

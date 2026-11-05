@@ -1,9 +1,12 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { isSignInSite, SIGN_IN_LABEL, signInTarget } from '@apply/core/signin'
 import {
   AuthError,
   createApiToken,
+  createLoginTicket,
+  getSettings,
   deleteSecret,
   revokeApiToken,
   SECRET_NAMES,
@@ -11,7 +14,7 @@ import {
   type SecretName,
 } from '@apply/db'
 import { db, stores } from '@/lib/db'
-import { encryptionKey } from '@/lib/env'
+import { encryptionKey, workerSignInUrl } from '@/lib/env'
 import { requireUser } from '@/lib/session'
 import type { FormState } from '@/lib/state'
 
@@ -72,4 +75,36 @@ export async function removeSessionAction(key: string): Promise<void> {
   const user = await requireUser()
   await stores(user.id).sessions.remove(key)
   revalidatePath('/connections')
+}
+
+export type StartSignInResult =
+  | { ok: true; wsUrl: string; ticket: string; key: string; label: string }
+  | { ok: false; error: string }
+
+/**
+ * Permission to open one sign in window for the signed in user. The ticket names the user, the
+ * site and the first page, lasts two minutes and works once. The window itself runs on the worker.
+ */
+export async function startSignInAction(
+  site: string,
+  workdayUrl?: string,
+): Promise<StartSignInResult> {
+  const user = await requireUser()
+  if (!isSignInSite(site)) return { ok: false, error: 'Unknown site.' }
+  const target = signInTarget(site, await getSettings(db(), user.id), workdayUrl)
+  if ('error' in target) return { ok: false, error: target.error }
+  const ticket = createLoginTicket(encryptionKey(), {
+    userId: user.id,
+    site: target.site,
+    key: target.key,
+    url: target.url,
+  })
+  return { ok: true, wsUrl: workerSignInUrl(), ticket, key: target.key, label: SIGN_IN_LABEL[site] }
+}
+
+/** Called by the sign in window after a save, so the page shows the new status. */
+export async function refreshConnectionsAction(): Promise<void> {
+  await requireUser()
+  revalidatePath('/connections')
+  revalidatePath('/')
 }

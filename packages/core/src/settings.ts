@@ -61,6 +61,10 @@ export const UserSettingsSchema = z.object({
       minDelayMs: z.number().int().min(0).max(600_000).default(2000),
       maxDelayMs: z.number().int().min(0).max(600_000).default(6000),
     })
+    .refine((p) => p.minDelayMs <= p.maxDelayMs, {
+      message: 'The longest pause must be at least as long as the shortest pause',
+      path: ['maxDelayMs'],
+    })
     .prefault({}),
   gate: z
     .object({
