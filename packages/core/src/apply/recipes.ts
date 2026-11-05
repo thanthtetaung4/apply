@@ -127,8 +127,10 @@ export const RECIPES: Record<SiteType, Recipe> = {
 export function siteTypeOf(job: Pick<Job, 'applyTarget' | 'source'>): SiteType {
   const t: ApplyTarget = job.applyTarget
   // A board-native job is applied to on the board it came from. A link the user added ("direct")
-  // is never board native; treat it as a company site if it ever claims to be.
-  if (t === 'board_native') return job.source === 'direct' ? 'company_site' : job.source
+  // or a watched careers page ("company") is never board native; treat it as a company site if it
+  // ever claims to be.
+  if (t === 'board_native')
+    return job.source === 'direct' || job.source === 'company' ? 'company_site' : job.source
   return t
 }
 

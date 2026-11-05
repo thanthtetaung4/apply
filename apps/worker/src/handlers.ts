@@ -1,11 +1,11 @@
-import type { SearchSource } from '@apply/core/status'
+import { INTAKE_SOURCES } from '@apply/core/status'
 import { z } from 'zod'
 import { enqueueTask, isCancelRequested, type Db, type Task } from '@apply/db'
 import type { WorkerEnv } from './env'
 import { buildUserEngine, type WorkerHooks } from './user-engine'
 
 const IntakePayload = z.object({
-  sources: z.array(z.enum(['indeed', 'linkedin', 'glassdoor'])).optional(),
+  sources: z.array(z.enum(INTAKE_SOURCES)).optional(),
   /** Job pages added by link. */
   urls: z
     .array(z.url({ protocol: /^https?$/ }).max(2000))
@@ -42,7 +42,7 @@ export async function handleTask(
       case 'intake': {
         const p = IntakePayload.parse(task.payload)
         const summary = await ue.engine.intake({
-          sources: p.sources as SearchSource[] | undefined,
+          sources: p.sources,
           urls: p.urls,
           dryRun: p.dryRun,
         })

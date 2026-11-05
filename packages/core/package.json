@@ -15,6 +15,7 @@
     "./gate": "./src/metrics/gate.ts",
     "./engine": "./src/engine.ts",
     "./intake": "./src/intake/index.ts",
+    "./careers-url": "./src/intake/careers-url.ts",
     "./board": "./src/board/index.ts",
     "./browser": "./src/browser/index.ts",
     "./llm": "./src/llm/index.ts",

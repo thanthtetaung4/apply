@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useAction } from './useAction'
 import type { UserSettings } from '@apply/core/settings'
+import { CAREERS_URL_EXAMPLES } from '@apply/core/careers-url'
 import { resetSettingsAction, saveSettingsAction } from '@/app/actions/settings'
 import { SITE_LABEL } from '@/lib/format'
 import type { FormState } from '@/lib/state'
@@ -93,6 +94,38 @@ export function SettingsForm({ settings: s }: { settings: UserSettings }) {
               Search {SITE_LABEL[src]}
             </label>
           ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>Company careers pages</h2>
+        <p className="muted">
+          Every search also reads these companies&apos; job lists directly, with the same titles,
+          places and excluded words as the boards. No browser or sign in is needed. Paste one
+          careers page per line from Greenhouse, Lever, Ashby or Workday.
+        </p>
+        <label className="row" style={{ fontWeight: 400 }}>
+          <input type="checkbox" name="watchlist.enabled" defaultChecked={s.watchlist.enabled} />{' '}
+          Search these companies
+        </label>
+        <textarea
+          name="watchlist.companies"
+          aria-label="Company careers pages"
+          rows={6}
+          defaultValue={s.watchlist.companies.join('\n')}
+          placeholder={CAREERS_URL_EXAMPLES.join('\n')}
+          style={{ marginTop: 8 }}
+        />
+        <div className="field" style={{ maxWidth: 260 }}>
+          <label htmlFor="wl-max">New jobs per company in one search</label>
+          <input
+            id="wl-max"
+            type="number"
+            min={1}
+            max={50}
+            name="watchlist.maxPerCompany"
+            defaultValue={s.watchlist.maxPerCompany}
+          />
         </div>
       </div>
 

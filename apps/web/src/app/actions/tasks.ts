@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { retryJob } from '@apply/core/retry'
 import { appendAnswer, validateProfileFile } from '@apply/core/profile'
+import { INTAKE_SOURCES } from '@apply/core/status'
 import {
   ConflictError,
   enqueueRun,
@@ -31,7 +32,7 @@ export async function startIntakeAction(_prev: FormState, fd: FormData): Promise
   const sources = fd
     .getAll('source')
     .map(String)
-    .filter((s) => ['indeed', 'linkedin', 'glassdoor'].includes(s))
+    .filter((s) => (INTAKE_SOURCES as readonly string[]).includes(s))
   const r = await enqueueTask(db(), user.id, 'intake', {
     thenRun: fd.get('thenRun') === 'on',
     ...(sources.length ? { sources } : {}),

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { careersUrlProblem } from './intake/careers-url'
 
 /**
  * Per user settings. These are stored as JSON in the database and edited in the web app.
@@ -92,6 +93,27 @@ export const UserSettingsSchema = z.object({
         searchPath: '/Job/jobs.htm?sc.keyword={q}&locKeyword={l}',
         linkSelector: 'a[href*="/job-listing/"]',
       }),
+    })
+    .prefault({}),
+  /**
+   * Company careers pages (Greenhouse, Lever, Ashby, Workday) searched through their public job
+   * APIs on every search, with the same title, location and exclude filters as the boards.
+   */
+  watchlist: z
+    .object({
+      enabled: z.boolean().default(true),
+      companies: z
+        .array(z.string().trim().min(1).max(500))
+        .max(100, 'Watch at most 100 companies')
+        .default([])
+        .superRefine((list, ctx) => {
+          for (const url of list) {
+            const problem = careersUrlProblem(url)
+            if (problem) ctx.addIssue({ code: 'custom', message: problem })
+          }
+        }),
+      /** New matching jobs queued per company in one search, best first. */
+      maxPerCompany: z.number().int().min(1).max(50).default(10),
     })
     .prefault({}),
   backends: z

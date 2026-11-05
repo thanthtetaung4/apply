@@ -32,11 +32,12 @@ export function skipReasonFor(
   const t = job.title.toLowerCase()
   if (profile.titles.exclude.some((x) => containsTerm(t, x))) return 'excluded_title'
   if (titleScore(job.title, profile.titles.titles) < 0.5) return 'title_mismatch'
+  // Remote jobs match only when "Remote" is one of your locations: most are tied to a country
+  // ("US-Remote", "Remote in Canada") that a location filter is meant to keep out.
   const locs = profile.titles.locations
   if (locs.length > 0 && job.location) {
     const l = job.location.toLowerCase()
-    if (!locs.some((x) => l.includes(x.toLowerCase())) && !/remote/.test(l))
-      return 'location_mismatch'
+    if (!locs.some((x) => l.includes(x.toLowerCase()))) return 'location_mismatch'
   }
   return null
 }

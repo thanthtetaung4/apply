@@ -57,6 +57,19 @@ export function formToSettings(
     set(text(fd, `sources.${src}.linkSelector`), (v) => (s.sources[src].linkSelector = v))
     set(num(fd, `sources.${src}.maxPerSearch`), (v) => (s.sources[src].maxPerSearch = v))
   }
+  // The watchlist box sends one careers page per line. Only change it when the form has it.
+  if (fd.has('watchlist.companies')) {
+    s.watchlist.enabled = bool(fd, 'watchlist.enabled')
+    s.watchlist.companies = [
+      ...new Set(
+        String(fd.get('watchlist.companies'))
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean),
+      ),
+    ]
+  }
+  set(num(fd, 'watchlist.maxPerCompany'), (v) => (s.watchlist.maxPerCompany = v))
   s.backends.shadow.enabled = bool(fd, 'backends.shadow.enabled')
   set(text(fd, 'backends.shadow.name'), (v) => (s.backends.shadow.name = v))
   set(num(fd, 'backends.shadow.sample'), (v) => (s.backends.shadow.sample = v / 100))
@@ -81,6 +94,8 @@ const LABELS: [RegExp, string][] = [
   [/^sources\.(\w+)\.linkSelector/, 'Job link selector ($1)'],
   [/^sources\.(\w+)\.maxPerSearch/, 'Jobs per search ($1)'],
   [/^backends\.shadow\.sample/, 'Share of jobs compared'],
+  [/^watchlist\.companies(\.\d+)?/, 'Company careers pages'],
+  [/^watchlist\.maxPerCompany/, 'New jobs per company'],
 ]
 
 /** "pacing.maxDelayMs: message" becomes "Longest pause: message". */

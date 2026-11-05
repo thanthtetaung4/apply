@@ -11,7 +11,8 @@ import type { LlmProvider } from './llm/types'
 import { Orchestrator } from './orchestrator'
 import type { Profile } from './profile'
 import type { UserSettings } from './settings'
-import type { SearchSource } from './shared/status'
+import type { IntakeSource } from './shared/status'
+import type { FetchLike } from './intake/watchlist'
 import type { Stores } from './store'
 import { ResumeRenderer } from './tailor'
 
@@ -53,6 +54,8 @@ export interface EngineOptions {
   rephrase?: boolean
   /** Extra URL rules for classifying apply targets (local test sites). */
   targetRules?: TargetRule[]
+  /** For the company watchlist's job APIs. Default: the global fetch. */
+  fetch?: FetchLike
 }
 
 export interface Engine {
@@ -60,7 +63,7 @@ export interface Engine {
   registry: BackendRegistry
   gateway: LlmGateway
   intake(options?: {
-    sources?: SearchSource[]
+    sources?: IntakeSource[]
     urls?: string[]
     dryRun?: boolean
   }): Promise<IntakeSummary>
@@ -106,6 +109,7 @@ export async function createEngine(o: EngineOptions): Promise<Engine> {
         store: o.stores.jobs,
         sessions: o.stores.sessions,
         targetRules: o.targetRules,
+        fetch: o.fetch,
         sources: options.sources,
         urls: options.urls,
         dryRun: options.dryRun,

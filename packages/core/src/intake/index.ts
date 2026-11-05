@@ -6,10 +6,18 @@ import type { JobStore, SessionStore } from '../store'
 import { isBlockedPage, isSignInForm } from '../apply/recipes'
 import { normalizeText, stableId } from '../shared/hash'
 import type { Job } from '../shared/job'
-import { SEARCH_SOURCES, type JobSource, type SearchSource } from '../shared/status'
+import {
+  SEARCH_SOURCES,
+  WATCHLIST_SOURCE,
+  type IntakeSource,
+  type JobSource,
+  type SearchSource,
+} from '../shared/status'
+import { CAREERS_SITE_LABEL, parseCareersUrl } from './careers-url'
 import { classifyApplyTarget, type TargetRule } from './classify'
 import { matchScore, skipReasonFor, type SkipReason } from './filter'
 import { parseJobPage, parseSearchLinks } from './parse'
+import { listCompanyJobs, type FetchLike, type Listing } from './watchlist'
 
 export interface IntakeSummary {
   found: number
@@ -30,8 +38,11 @@ export interface IntakeDeps {
   store: JobStore
   sessions: SessionStore
   log?: (line: string) => void
-  /** Only these boards. Default: all enabled ones. With `urls` and no `sources`, none. */
-  sources?: SearchSource[]
+  /**
+   * Only these boards and/or the company watchlist ("company"). Default: all enabled ones. With
+   * `urls` and no `sources`, none.
+   */
+  sources?: IntakeSource[]
   /**
    * Job pages the user added by link (company career pages, Greenhouse, Lever, Ashby). Saved as
    * source "direct". The user chose them, so title and location filters do not apply.
@@ -39,6 +50,8 @@ export interface IntakeDeps {
   urls?: string[]
   /** Extra URL rules for classifying apply targets (local test sites). */
   targetRules?: TargetRule[]
+  /** For the company watchlist's job APIs. Default: the global fetch. */
+  fetch?: FetchLike
   /** Parse and report without saving. */
   dryRun?: boolean
   now?: () => Date
@@ -78,8 +91,11 @@ export async function runIntake(d: IntakeDeps): Promise<IntakeSummary> {
     blocked: [],
   }
   // Adding links only does not also search every board.
-  const wanted = d.sources ?? (d.urls?.length ? [] : [...SEARCH_SOURCES])
-  const sources = wanted.filter((s) => d.settings.sources[s].enabled)
+  const wanted: IntakeSource[] =
+    d.sources ?? (d.urls?.length ? [] : [...SEARCH_SOURCES, WATCHLIST_SOURCE])
+  const sources = wanted
+    .filter((s): s is SearchSource => s !== WATCHLIST_SOURCE)
+    .filter((s) => d.settings.sources[s].enabled)
   const seenThisRun = new Set<string>()
   const jobKeysThisRun = new Set<string>()
   const now = d.now ?? (() => new Date())
@@ -211,8 +227,114 @@ export async function runIntake(d: IntakeDeps): Promise<IntakeSummary> {
     }
   }
 
+  if (
+    wanted.includes(WATCHLIST_SOURCE) &&
+    d.settings.watchlist.enabled &&
+    d.settings.watchlist.companies.length > 0
+  )
+    await searchWatchlist(d, summary, jobKeysThisRun, now)
   if (d.urls?.length) await addLinks(d, d.urls, summary, jobKeysThisRun, now)
   return summary
+}
+
+/** Most Workday detail pages read per company in one search. */
+const MAX_DETAIL_LOADS = 30
+
+/**
+ * Read each watched company's careers page through its hiring system's job API, filter with the
+ * profile like a board search, and queue the best new matches (up to `maxPerCompany` each).
+ * Jobs that do not match are counted but not saved: a company lists hundreds of them.
+ */
+async function searchWatchlist(
+  d: IntakeDeps,
+  summary: IntakeSummary,
+  jobKeysThisRun: Set<string>,
+  now: () => Date,
+): Promise<void> {
+  const source = WATCHLIST_SOURCE
+  const per = (summary.perSource[source] = { found: 0, queued: 0 })
+  const doFetch = d.fetch ?? ((url: string, init?: RequestInit) => fetch(url, init))
+  const { maxPerCompany, companies } = d.settings.watchlist
+
+  for (const careersUrl of companies) {
+    const site = parseCareersUrl(careersUrl)
+    if (!site) continue // settings validation rejects these; skip rather than fail the run
+    const label = `${CAREERS_SITE_LABEL[site.kind]} ${careersUrl}`
+    try {
+      const listings = await listCompanyJobs(site, {
+        fetch: doFetch,
+        titles: d.profile.titles.titles,
+      })
+      const candidates: { job: Job; score: number }[] = []
+      let detailLoads = 0
+      for (const l of listings) {
+        summary.found++
+        per.found++
+        // Title and exclude words first: no request and no database read for most jobs.
+        const titleReason = skipReasonFor({ title: l.title }, d.profile)
+        if (titleReason) {
+          summary.skipped[titleReason]++
+          continue
+        }
+        const id = stableId('job', source, canonical(l.url))
+        if (await d.store.getJob(id)) {
+          summary.skipped.already_seen++
+          continue
+        }
+        let full: Listing = l
+        if (l.details) {
+          if (detailLoads >= MAX_DETAIL_LOADS) continue // left for the next search
+          detailLoads++
+          full = { ...l, ...(await l.details()) }
+        }
+        const job: Job = {
+          id,
+          source,
+          sourceUrl: full.url,
+          title: full.title,
+          company: full.company,
+          location: full.location,
+          description: full.description,
+          applyUrl: full.applyUrl,
+          applyTarget: classifyApplyTarget(full.applyUrl, '', d.targetRules),
+          postedAt: full.postedAt,
+          fetchedAt: now().toISOString(),
+        }
+        const reason = skipReasonFor(job, d.profile)
+        if (reason) {
+          summary.skipped[reason]++
+          continue
+        }
+        candidates.push({ job, score: matchScore(job, d.profile) })
+      }
+
+      candidates.sort((a, b) => b.score - a.score)
+      let queued = 0
+      for (const { job, score } of candidates) {
+        if (queued >= maxPerCompany) break // the rest stay unsaved and come back next search
+        const keys = [
+          job.applyUrl,
+          [job.company, job.title, job.location ?? ''].map(normalizeText).join('|'),
+        ]
+        if ((await d.store.findDuplicate(job)) || keys.some((k) => jobKeysThisRun.has(k))) {
+          summary.skipped.duplicate++
+          d.log?.(`skipped   ${job.company} | ${job.title}  (duplicate)`)
+          continue
+        }
+        keys.forEach((k) => jobKeysThisRun.add(k))
+        if (!d.dryRun) await d.store.addJob(job, 'queued', undefined, score)
+        queued++
+        summary.queued++
+        per.queued++
+        d.log?.(`queued    ${job.company} | ${job.title}  [${job.applyTarget}, score ${score}]`)
+      }
+      d.log?.(`${label}: ${listings.length} jobs listed, ${queued} queued`)
+    } catch (err) {
+      const message = `${label}: ${(err as Error).message}`
+      summary.errors.push(`${source}: ${message}`)
+      d.log?.(`source ${source} failed: ${message}`)
+    }
+  }
 }
 
 /** "careers.thunes.com" or "job-boards.greenhouse.io/okx/..." to a company name, if the page has none. */

@@ -97,8 +97,21 @@ describe('filters', () => {
     expect(skipReasonFor({ title: 'AI Engineer', location: 'Berlin' }, profile)).toBe(
       'location_mismatch',
     )
-    expect(skipReasonFor({ title: 'AI Engineer', location: 'Remote, EU' }, profile)).toBeNull()
     expect(skipReasonFor({ title: 'AI Engineer', location: 'Singapore' }, profile)).toBeNull()
+    expect(
+      skipReasonFor({ title: 'AI Engineer', location: 'Singapore; US-Remote' }, profile),
+    ).toBeNull()
+  })
+
+  it('counts remote jobs only when Remote is one of your locations', () => {
+    // The demo profile lists Singapore only.
+    for (const location of ['Remote, EU', 'US-Remote', 'Remote in Canada', 'Remote'])
+      expect(skipReasonFor({ title: 'AI Engineer', location }, profile)).toBe('location_mismatch')
+    const remoteToo = {
+      ...profile,
+      titles: { ...profile.titles, locations: ['Singapore', 'Remote'] },
+    }
+    expect(skipReasonFor({ title: 'AI Engineer', location: 'Remote, EU' }, remoteToo)).toBeNull()
   })
 
   it('gives a higher match score when the job asks for what you have', () => {
