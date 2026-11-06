@@ -84,6 +84,8 @@ export class OpenRouterProvider implements LlmProvider {
             'content-type': 'application/json',
           },
           body,
+          // A user's own server could redirect to an internal address; never follow it.
+          redirect: 'manual',
           signal: AbortSignal.timeout(this.options.timeoutMs ?? 60_000),
         })
       } catch (err) {

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useAction } from './useAction'
-import type { UserSettings } from '@apply/core/settings'
+import type { AiMode, UserSettings } from '@apply/core/settings'
 import { CAREERS_URL_EXAMPLES } from '@apply/core/careers-url'
 import { resetSettingsAction, saveSettingsAction } from '@/app/actions/settings'
 import { SITE_LABEL } from '@/lib/format'
@@ -23,7 +23,17 @@ const BACKEND_LABEL: Record<string, string> = {
  * Everyday settings first, in plain words. Technical tuning is under Advanced; its fields are
  * still part of the form, so saving keeps them.
  */
-export function SettingsForm({ settings: s }: { settings: UserSettings }) {
+export interface AiChoice {
+  /** The mode in effect now (saved, or the default when none is saved). */
+  mode: AiMode
+  platformEnabled: boolean
+  freePerWeek: number
+  hasKey: boolean
+  hasServer: boolean
+}
+
+export function SettingsForm({ settings: s, ai }: { settings: UserSettings; ai: AiChoice }) {
+  const [mode, setMode] = useState<AiMode>(ai.mode)
   const { state, onSubmit, pending } = useAction(saveSettingsAction)
   const [reset, setReset] = useState<FormState>({})
   const [resetting, startReset] = useTransition()
@@ -165,11 +175,118 @@ export function SettingsForm({ settings: s }: { settings: UserSettings }) {
         <h2>AI answers</h2>
         <p className="muted">
           When a form asks something your saved answers do not cover, a model can answer from your
-          profile, or leave it for you if it is not sure. It needs an OpenRouter key on the
-          Connections page; without one those questions always come to you. Model names are
-          OpenRouter ids, for example <code>openai/gpt-4o-mini</code>.
+          profile, or leave it for you if it is not sure. AI is optional: without it those questions
+          come to you. It never answers questions about work permits, sponsorship, salary or
+          self-identification.
         </p>
-        <div className="three">
+        <div className="field">
+          {(
+            [
+              ['none', 'No AI', 'Free. Questions your saved answers do not cover come to you.'],
+              ...(ai.platformEnabled
+                ? ([
+                    [
+                      'hosted',
+                      'App AI',
+                      `${ai.freePerWeek} applications free each week, then purchased ones. Nothing to set up.`,
+                    ],
+                  ] as const)
+                : []),
+              [
+                'openrouter',
+                'My OpenRouter key',
+                ai.hasKey
+                  ? 'No limit from the app. You pay OpenRouter.'
+                  : 'Add your key on the Connections page first.',
+              ],
+              [
+                'custom',
+                'My own server (Ollama)',
+                ai.hasServer
+                  ? 'No limit and no cost from the app.'
+                  : 'Add your server on the Connections page first.',
+              ],
+            ] as const
+          ).map(([value, label, hint]) => (
+            <label key={value} className="row" style={{ fontWeight: 400, alignItems: 'baseline' }}>
+              <input
+                type="radio"
+                name="llm.mode"
+                value={value}
+                checked={mode === value}
+                onChange={() => setMode(value)}
+              />{' '}
+              <span>
+                <b>{label}</b> <span className="muted small">{hint}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+
+        {mode === 'custom' && (
+          <div className="three">
+            <div className="field">
+              <label htmlFor="c-model">Model name</label>
+              <input
+                id="c-model"
+                type="text"
+                name="llm.custom.model"
+                placeholder="qwen3:8b"
+                defaultValue={s.llm.custom.model}
+              />
+              <span className="hint">As your server lists it, for example in ollama list.</span>
+            </div>
+            <div className="field">
+              <label htmlFor="c-think">Let it think</label>
+              <select
+                id="c-think"
+                name="llm.custom.think"
+                defaultValue={s.llm.custom.thinkTasks.length > 0 ? 'answers' : 'never'}
+              >
+                <option value="answers">When answering questions</option>
+                <option value="never">Never (model without thinking)</option>
+              </select>
+              <span className="hint">
+                Small thinking models answer badly without thinking. On Ollama the app checks what
+                the model can do, so this is safe either way.
+              </span>
+            </div>
+            <div className="field">
+              <label htmlFor="c-timeout">Wait per answer (seconds)</label>
+              <input
+                id="c-timeout"
+                type="number"
+                min={5}
+                max={600}
+                name="llm.custom.timeoutMs"
+                defaultValue={s.llm.custom.timeoutMs / 1000}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="c-ctx">Context size (tokens, Ollama)</label>
+              <input
+                id="c-ctx"
+                type="number"
+                min={2048}
+                max={131072}
+                step={1024}
+                name="llm.custom.contextTokens"
+                defaultValue={s.llm.custom.contextTokens}
+              />
+              <span className="hint">
+                8192 fits a job posting. Larger uses more memory on your machine.
+              </span>
+            </div>
+          </div>
+        )}
+
+        {mode === 'openrouter' && (
+          <p className="muted small">
+            Model names are OpenRouter ids, for example <code>openai/gpt-4o-mini</code>, or a free
+            one such as <code>meta-llama/llama-3.3-70b-instruct:free</code>.
+          </p>
+        )}
+        <div className="three" hidden={mode !== 'openrouter'}>
           {(
             [
               ['cheap', 'Everyday model', 'Reads job descriptions and answers questions.'],
@@ -189,7 +306,7 @@ export function SettingsForm({ settings: s }: { settings: UserSettings }) {
             </div>
           ))}
         </div>
-        <div className="field" style={{ maxWidth: 260 }}>
+        <div className="field" style={{ maxWidth: 260 }} hidden={mode !== 'openrouter'}>
           <label htmlFor="m-b">Daily spending limit (USD)</label>
           <input
             id="m-b"

@@ -441,3 +441,57 @@ export const taskLogs = pgTable(
   },
   (t) => [index('task_logs_task_idx').on(t.taskId, t.id)],
 )
+
+/**
+ * Jobs that used the app's own model. A job counts once, however many calls it makes. "free" rows
+ * count against the weekly allowance; "credit" rows used one purchased credit.
+ */
+export const platformAiJobs = pgTable(
+  'platform_ai_jobs',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    jobId: text('job_id').notNull(),
+    source: text('source').notNull(),
+    at: ts('at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.jobId] }),
+    check('platform_ai_jobs_source_ck', inList(t.source, ['free', 'credit'])),
+    index('platform_ai_jobs_user_at_idx').on(t.userId, t.at),
+  ],
+)
+
+/** Purchased AI applications left. They never expire and are used after the weekly free ones. */
+export const aiCredits = pgTable(
+  'ai_credits',
+  {
+    userId: uuid('user_id')
+      .primaryKey()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    balance: integer('balance').notNull().default(0),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [check('ai_credits_balance_ck', sql`${t.balance} >= 0`)],
+)
+
+/** Completed Stripe Checkout sessions. The unique session id makes a repeated webhook harmless. */
+export const aiCreditPurchases = pgTable(
+  'ai_credit_purchases',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    stripeSessionId: text('stripe_session_id').notNull(),
+    credits: integer('credits').notNull(),
+    amountCents: integer('amount_cents'),
+    currency: text('currency'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('ai_credit_purchases_session_uq').on(t.stripeSessionId),
+    index('ai_credit_purchases_user_idx').on(t.userId, t.createdAt),
+  ],
+)

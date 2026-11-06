@@ -36,6 +36,14 @@ export function formToSettings(
   for (const m of ['cheap', 'mid', 'strong'] as const)
     set(text(fd, `llm.models.${m}`), (v) => (s.llm.models[m] = v))
   set(num(fd, 'llm.dailyBudgetUsd'), (v) => (s.llm.dailyBudgetUsd = v))
+  // Checked by parseSettings below, so an unknown value is reported, not saved.
+  set(text(fd, 'llm.mode'), (v) => (s.llm.mode = v as UserSettings['llm']['mode']))
+  set(text(fd, 'llm.custom.model'), (v) => (s.llm.custom.model = v))
+  set(text(fd, 'llm.custom.think'), (v) => {
+    s.llm.custom.thinkTasks = v === 'never' ? [] : ['answer_field']
+  })
+  set(num(fd, 'llm.custom.timeoutMs'), (v) => (s.llm.custom.timeoutMs = v * 1000))
+  set(num(fd, 'llm.custom.contextTokens'), (v) => (s.llm.custom.contextTokens = v))
 
   for (const t of SITE_TYPES) {
     set(
@@ -87,6 +95,10 @@ const LABELS: [RegExp, string][] = [
   [/^gate\.minAccuracy/, 'Share that must pass checks'],
   [/^llm\.models\.(\w+)/, 'Model ($1)'],
   [/^llm\.dailyBudgetUsd/, 'Daily model budget'],
+  [/^llm\.mode/, 'AI'],
+  [/^llm\.custom\.model/, 'Server model name'],
+  [/^llm\.custom\.timeoutMs/, 'Wait per answer'],
+  [/^llm\.custom\.contextTokens/, 'Context size'],
   [/^sites\.(\w+)\.dailyCap/, 'Max per day ($1)'],
   [/^sites\.(\w+)\.(backend|fallback)/, 'Browser ($1)'],
   [/^sources\.(\w+)\.baseUrl/, 'Site address ($1)'],

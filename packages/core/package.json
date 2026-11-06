@@ -19,6 +19,7 @@
     "./board": "./src/board/index.ts",
     "./browser": "./src/browser/index.ts",
     "./llm": "./src/llm/index.ts",
+    "./llm-endpoint": "./src/llm/endpoint.ts",
     "./demo": "./src/demo/index.ts",
     "./profile-fs": "./src/profile/fs.ts",
     "./signin": "./src/signin.ts"

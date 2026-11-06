@@ -225,11 +225,11 @@ describe('local model servers', () => {
   })
 
   it('validates the reply even without JSON mode, so an echoed input fails closed', async () => {
-    const echo = vi.fn(async () => reply('{"question":"Will you require visa sponsorship?"}'))
+    const echo = vi.fn(async () => reply('{"question":"Which office would you prefer?"}'))
     const gw = new LlmGateway({ provider: { name: 'local', complete: echo }, models })
     await expect(
       answerField(gw, {
-        question: 'Will you require visa sponsorship?',
+        question: 'Which office would you prefer?',
         type: 'select',
         options: ['Yes', 'No'],
         required: true,
@@ -238,5 +238,58 @@ describe('local model servers', () => {
       }),
     ).rejects.toThrow(/invalid after a retry/)
     expect(echo).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('AI safety fixes', () => {
+  const field = (question: string, options?: string[]) => ({
+    question,
+    type: options ? 'select' : 'text',
+    options,
+    required: true,
+    job: { title: 'Backend Engineer', company: 'Acme' },
+    facts: { skills: [{ category: 'Languages', skills: ['TypeScript'] }] },
+  })
+
+  it('never asks the model about legal or personal questions', async () => {
+    const complete = vi.fn(async () => reply('{"answer":"No"}'))
+    const gw = new LlmGateway({ provider: { name: 'p', complete }, models })
+    for (const q of [
+      'Will you require visa sponsorship?',
+      'Are you legally authorized to work in the US?',
+      'What are your salary expectations?',
+      'Do you have a disability?',
+    ]) {
+      expect((await answerField(gw, field(q, ['Yes', 'No']))).answer).toBeNull()
+    }
+    expect(complete).not.toHaveBeenCalled()
+  })
+
+  it('rejects free-text answers with numbers or tools not in the facts', async () => {
+    const say = (text: string) =>
+      new LlmGateway({
+        provider: { name: 'p', complete: async () => reply(JSON.stringify({ answer: text })) },
+        models,
+      })
+    const q = field('Tell us about your backend experience')
+    expect((await answerField(say('I have 7 years with Kubernetes.'), q)).answer).toBeNull()
+    expect((await answerField(say('I build services in TypeScript.'), q)).answer).toBe(
+      'I build services in TypeScript.',
+    )
+  })
+
+  it('does not reuse answers cached from a different provider', async () => {
+    const store = new MemoryLlmStore()
+    const offline = new LlmGateway({ provider: new OfflineProvider(), models, store })
+    const q = field('Which office would you prefer?', ['London', 'Berlin'])
+    expect((await answerField(offline, q)).answer).toBeNull()
+    const real = new LlmGateway({
+      provider: { name: 'openrouter', complete: async () => reply('{"answer":"Berlin"}') },
+      models,
+      store,
+    })
+    const res = await answerField(real, q)
+    expect(res.cached).toBe(false)
+    expect(res.answer).toBe('Berlin')
   })
 })

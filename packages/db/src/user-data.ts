@@ -118,6 +118,8 @@ export async function saveSettings(db: Db, userId: string, settings: UserSetting
 
 export const SECRET_NAMES = {
   openrouterKey: 'openrouter_api_key',
+  llmEndpointUrl: 'llm_endpoint_url',
+  llmEndpointKey: 'llm_endpoint_key',
   boardUrl: 'board_mcp_url',
   boardToken: 'board_mcp_token',
 } as const

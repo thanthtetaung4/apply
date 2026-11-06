@@ -2,8 +2,9 @@ import { readFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { containsTerm } from '../llm/offline'
-import type { LlmGateway } from '../llm/gateway'
+import { containsTerm, OfflineProvider } from '../llm/offline'
+import { LlmGateway } from '../llm/gateway'
+import { LlmError } from '../llm/types'
 import { extractRequirements, rephraseBullet, type Requirements } from '../llm/tasks'
 import type { LoadedProfile } from '../profile'
 import type { Job } from '../shared/job'
@@ -50,6 +51,17 @@ export interface TailorDeps {
   /** Reword bullets with a model. Off by default. Every rewrite goes through the grounding check. */
   rephrase?: boolean
   limits?: SelectionLimits
+}
+
+/** About 3,000 tokens: with the known terms and instructions it fits an 8k context. */
+export const MAX_DESCRIPTION_CHARS = 12_000
+
+/** A store-less gateway over the deterministic offline provider: no cache, budget or usage. */
+function offlineGateway(): LlmGateway {
+  return new LlmGateway({
+    provider: new OfflineProvider(),
+    models: { cheap: 'offline', mid: 'offline', strong: 'offline' },
+  })
 }
 
 function knownTerms(profile: LoadedProfile): string[] {
@@ -151,10 +163,21 @@ export async function tailorResume(job: Job, deps: TailorDeps): Promise<Tailored
   let tokensOut = 0
   let costUsd = 0
 
-  const reqRes = await extractRequirements(
-    gateway,
-    { jobTitle: job.title, description: job.description, knownTerms: knownTerms(profile) },
-    { jobId: job.id },
+  const reqInput = {
+    jobTitle: job.title,
+    // Long postings are mostly boilerplate after the requirements, and a local model's context is
+    // small. The skills the model returns are still checked against the full description.
+    description: job.description.slice(0, MAX_DESCRIPTION_CHARS),
+    knownTerms: knownTerms(profile),
+  }
+  // A model failure (budget, network, bad output) falls back to the offline keyword match instead
+  // of failing the job: the result is filtered against the description below either way.
+  const reqRes = await extractRequirements(gateway, reqInput, { jobId: job.id }).catch(
+    async (err: unknown) => {
+      if (!(err instanceof LlmError)) throw err
+      warnings.push(`requirements: model failed (${err.message}), used keyword matching`)
+      return extractRequirements(offlineGateway(), reqInput)
+    },
   )
   tokensIn += reqRes.tokensIn
   tokensOut += reqRes.tokensOut

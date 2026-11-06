@@ -52,6 +52,10 @@ export interface EngineOptions {
   sleep?: (ms: number) => Promise<void>
   random?: () => number
   rephrase?: boolean
+  /** See GatewayOptions.admit: limits model calls on the app's own model. */
+  admitModelCall?: (jobId: string | undefined) => Promise<boolean>
+  /** Replaces settings.llm.dailyBudgetUsd, e.g. a lower cap when the app's own key pays. */
+  dailyBudgetUsd?: number
   /** Extra URL rules for classifying apply targets (local test sites). */
   targetRules?: TargetRule[]
   /** For the company watchlist's job APIs. Default: the global fetch. */
@@ -79,7 +83,8 @@ export async function createEngine(o: EngineOptions): Promise<Engine> {
     provider: o.provider ?? new OfflineProvider(),
     models: o.settings.llm.models,
     store: o.stores.llm,
-    dailyBudgetUsd: o.settings.llm.dailyBudgetUsd,
+    dailyBudgetUsd: o.dailyBudgetUsd ?? o.settings.llm.dailyBudgetUsd,
+    admit: o.admitModelCall,
   })
   const orchestrator = new Orchestrator({
     settings: o.settings,

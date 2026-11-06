@@ -3,6 +3,7 @@ import { SIGN_IN_LABEL } from '@apply/core/signin'
 import { listApiTokens, listSecretNames, type SessionInfo } from '@apply/db'
 import {
   BoardForm,
+  EndpointForm,
   ModelKeyForm,
   RemoveSessionButton,
   RevokeButton,
@@ -119,13 +120,31 @@ export default async function Connections() {
       </div>
 
       <div className="card">
-        <h2>Model</h2>
+        <h2>AI model</h2>
         <p className="muted small">
-          Your own OpenRouter key pays for any model calls, so usage is yours alone. Without a key
-          the app fills forms from your profile and saved answers and parks anything it cannot
-          answer.
+          Optional. The app works without AI: it fills forms from your profile and saved answers and
+          brings anything else to you. Choose which AI to use on the Settings page.
+        </p>
+        <h3>Your OpenRouter key</h3>
+        <p className="muted small">
+          Your key pays for the calls, so there is no limit from the app. Many OpenRouter models
+          ending in <code>:free</code> cost nothing.
         </p>
         <ModelKeyForm saved={has('openrouter_api_key')} />
+        <h3 style={{ marginTop: 18 }}>Your own server (Ollama, LM Studio, llama.cpp)</h3>
+        <p className="muted small">
+          Your Ollama address, or any OpenAI-compatible one ending in <code>/v1</code>. The app runs
+          on a server, so it cannot reach <code>localhost</code> on your computer: share Ollama
+          through a tunnel such as Cloudflare Tunnel, Tailscale Funnel or ngrok, and use that https
+          address. For Ollama the app sets the context size, keeps replies to the right format and
+          turns thinking on only for models that support it.
+        </p>
+        <p className="muted small">
+          Ollama has no password of its own, so anyone with the tunnel address could use your
+          computer. Protect the tunnel (for example Cloudflare Access or ngrok basic auth) and put
+          its token in the key field: the app sends it as a Bearer token.
+        </p>
+        <EndpointForm saved={has('llm_endpoint_url')} />
       </div>
 
       <div className="card">

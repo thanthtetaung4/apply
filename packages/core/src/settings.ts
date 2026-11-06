@@ -31,11 +31,44 @@ export const SourceConfigSchema = z.object({
 })
 export type SourceConfig = z.infer<typeof SourceConfigSchema>
 
+export const AiModeSchema = z.enum(['none', 'hosted', 'openrouter', 'custom'])
+export type AiMode = z.infer<typeof AiModeSchema>
+
+/** The user's AI mode as it will actually run: unset picks their key, then the app's model. */
+export function effectiveAiMode(
+  settings: Pick<UserSettings, 'llm'>,
+  hasOpenRouterKey: boolean,
+): AiMode {
+  return settings.llm.mode ?? (hasOpenRouterKey ? 'openrouter' : 'hosted')
+}
+
 export const UserSettingsSchema = z.object({
   /** Parallel browser contexts for one run. Capped by the worker. */
   workers: z.number().int().min(1).max(4).default(2),
   llm: z
     .object({
+      /**
+       * Where AI calls go. "none": no AI, questions come to you. "hosted": the app's own model,
+       * free for a few applications a week, then paid credits. "openrouter": your OpenRouter key.
+       * "custom": your own OpenAI-compatible server such as Ollama. Unset: your OpenRouter key if
+       * you saved one, otherwise the app's model.
+       */
+      mode: AiModeSchema.optional(),
+      /** Your own server (mode "custom"). Its URL and key are saved encrypted on Connections. */
+      custom: z
+        .object({
+          model: z.string().default(''),
+          /** Tasks the model may think on. Thinking tasks are sent without JSON mode. */
+          thinkTasks: z
+            .array(z.enum(['extract_requirements', 'answer_field', 'rephrase_bullet']))
+            .default(['answer_field']),
+          timeoutMs: z.number().int().min(5_000).max(600_000).default(180_000),
+          maxTokens: z.number().int().min(100).max(32_000).default(1200),
+          /** Ollama only: context window per request, capped at the model's own maximum. */
+          contextTokens: z.number().int().min(2048).max(131_072).default(8192),
+        })
+        .prefault({}),
+      /** OpenRouter model ids, used with mode "openrouter". */
       models: z
         .object({
           cheap: z.string().min(1),

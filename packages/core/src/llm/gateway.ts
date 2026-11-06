@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { z } from 'zod'
+import { z } from 'zod'
 import type { LlmStore } from '../store'
 import { PROMPT_VERSION, SYSTEM_PROMPTS } from './prompts'
 import { LlmError, type LlmProvider, type LlmTask, type ModelTier } from './types'
@@ -11,12 +11,23 @@ export interface GatewayOptions {
   store?: LlmStore
   /** Stop when today's spend reaches this amount (USD). */
   dailyBudgetUsd?: number
+  /**
+   * Asked before every model call that the cache does not answer. Returning false stops the call
+   * with an LlmError of kind "quota"; callers then carry on without AI. Used for the app's own
+   * model, which is free for a few applications a week and paid after that.
+   */
+  admit?: (jobId: string | undefined) => Promise<boolean>
   now?: () => Date
 }
 
 export interface RunOptions {
   jobId?: string
   tier?: ModelTier
+  /**
+   * A stricter JSON Schema for providers that enforce one while generating, e.g. the allowed
+   * options of a select question. The reply is still validated against the zod schema.
+   */
+  replySchema?: Record<string, unknown>
 }
 
 export interface RunResult<T> {
@@ -54,6 +65,17 @@ export function parseJsonReply(text: string): unknown {
   }
 }
 
+/** The reply schema as JSON Schema, for providers that enforce it. Undefined if not expressible. */
+function toJsonSchema(schema: z.ZodType): Record<string, unknown> | undefined {
+  try {
+    const json = z.toJSONSchema(schema) as Record<string, unknown>
+    delete json.$schema
+    return json
+  } catch {
+    return undefined
+  }
+}
+
 /** The single entry point for model calls: caching, structured output, budget and accounting. */
 export class LlmGateway {
   constructor(private readonly o: GatewayOptions) {}
@@ -76,8 +98,10 @@ export class LlmGateway {
     const model = this.o.models[tier]
     const prompt = JSON.stringify(input)
     const system = SYSTEM_PROMPTS[task]
+    // The provider is part of the key: the offline stand-in answers UNKNOWN to everything, and
+    // those answers must not be served once a real model is configured under the same name.
     const key = createHash('sha1')
-      .update([task, PROMPT_VERSION, model, system, prompt].join('\u0000'))
+      .update([task, PROMPT_VERSION, this.o.provider.name, model, system, prompt].join('\u0000'))
       .digest('hex')
 
     const cached = await this.o.store?.getCache(key)
@@ -92,7 +116,11 @@ export class LlmGateway {
     if (this.o.dailyBudgetUsd !== undefined && (await this.spentToday()) >= this.o.dailyBudgetUsd) {
       throw new LlmError(`Daily model budget of $${this.o.dailyBudgetUsd} reached`, 'budget')
     }
+    if (this.o.admit && !(await this.o.admit(options.jobId))) {
+      throw new LlmError('No AI applications left this week', 'quota')
+    }
 
+    const jsonSchema = options.replySchema ?? toJsonSchema(schema)
     let tokensIn = 0
     let tokensOut = 0
     let costUsd = 0
@@ -102,6 +130,7 @@ export class LlmGateway {
         task,
         model,
         system,
+        schema: jsonSchema,
         prompt:
           attempt === 0
             ? prompt

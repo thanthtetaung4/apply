@@ -59,6 +59,28 @@ const Schema = z.object({
    * it stops, the reply fails validation, and the question goes to the user instead.
    */
   LLM_MAX_TOKENS: z.coerce.number().int().min(100).max(32_000).default(1200),
+  /**
+   * Ollama only: context window per request (num_ctx), capped at the model's maximum. Ollama's
+   * default (about 2048) silently drops the start of longer prompts, instructions included.
+   */
+  LLM_NUM_CTX: z.coerce.number().int().min(2048).max(131_072).default(8192),
+
+  /**
+   * The app's own model ("App AI" mode). Without a key that mode runs without AI. The app pays for
+   * these calls, so they are limited: FREE_AI_APPLICATIONS_PER_WEEK jobs per user each week
+   * (Monday 00:00 UTC), then purchased credits.
+   */
+  PLATFORM_OPENROUTER_KEY: z.string().optional(),
+  /** OpenRouter model id for every tier in App AI mode. */
+  PLATFORM_MODEL: z.string().min(1).default('openai/gpt-4o-mini'),
+  FREE_AI_APPLICATIONS_PER_WEEK: z.coerce.number().int().min(0).max(1000).default(5),
+  /** Per user daily spend cap on the app's key, whatever the user's own setting says. */
+  PLATFORM_DAILY_BUDGET_USD: z.coerce.number().positive().max(100).default(0.5),
+  /**
+   * Self-hosted installs: let users point "Your own server" at private addresses such as
+   * http://192.168.1.10:11434/v1 or localhost. Never set on a shared, hosted worker.
+   */
+  ALLOW_PRIVATE_LLM_ENDPOINTS: z.string().optional(),
 
   /**
    * Private key(s) that open sealed sign in sessions (pnpm keys:generate). Only the worker has

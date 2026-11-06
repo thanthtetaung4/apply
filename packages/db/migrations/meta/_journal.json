@@ -29,6 +29,13 @@
       "when": 1793860664294,
       "tag": "0003_company_job_source",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793950721347,
+      "tag": "0004_ai_credits",
+      "breakpoints": true
     }
   ]
 }

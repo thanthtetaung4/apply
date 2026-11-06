@@ -23,3 +23,33 @@ export const sessionPublicKey = () => (sealKey ??= parsePublicKey(process.env.SE
  */
 export const workerSignInUrl = () =>
   (process.env.WORKER_SIGNIN_URL ?? 'ws://localhost:4100/signin').replace(/\/$/, '')
+
+/**
+ * App AI: the app's own model. The worker holds the key (PLATFORM_OPENROUTER_KEY); the web app
+ * only needs to know whether it is offered (PLATFORM_AI=on) and the weekly free allowance, which
+ * must match the worker's FREE_AI_APPLICATIONS_PER_WEEK.
+ */
+export const platformAi = () => ({
+  enabled: process.env.PLATFORM_AI === 'on',
+  freePerWeek: Math.max(0, Math.floor(Number(process.env.FREE_AI_APPLICATIONS_PER_WEEK ?? 5)) || 0),
+})
+
+/**
+ * Selling AI applications with Stripe Checkout. STRIPE_PRICE_ID is a one-time price for one pack
+ * of AI_CREDITS_PER_PACK applications. Off unless the secret key, webhook secret and price are set.
+ */
+export const billing = () => {
+  const secretKey = process.env.STRIPE_SECRET_KEY
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET
+  const priceId = process.env.STRIPE_PRICE_ID
+  const creditsPerPack = Math.floor(Number(process.env.AI_CREDITS_PER_PACK ?? 50))
+  return {
+    enabled: Boolean(secretKey && webhookSecret && priceId && creditsPerPack > 0),
+    secretKey,
+    webhookSecret,
+    priceId,
+    creditsPerPack,
+    /** Public address of the web app, for Stripe's return links. */
+    appUrl: (process.env.APP_URL ?? 'http://localhost:3000').replace(/\/$/, ''),
+  }
+}

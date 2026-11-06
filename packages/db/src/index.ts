@@ -6,6 +6,7 @@ export * from './user-data'
 export * from './queries'
 export * from './files'
 export * from './login-ticket'
+export * from './ai-quota'
 export { PgJobStore, siteTypeOfRow } from './job-store'
 export {
   PgLlmStore,

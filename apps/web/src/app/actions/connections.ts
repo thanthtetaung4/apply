@@ -13,6 +13,7 @@ import {
   setSecret,
   type SecretName,
 } from '@apply/db'
+import { endpointProblem } from '@apply/core/llm-endpoint'
 import { db, stores } from '@/lib/db'
 import { encryptionKey, workerSignInUrl } from '@/lib/env'
 import { requireUser } from '@/lib/session'
@@ -25,6 +26,26 @@ export async function saveModelKeyAction(_prev: FormState, fd: FormData): Promis
   await setSecret(db(), encryptionKey(), user.id, SECRET_NAMES.openrouterKey, key)
   revalidatePath('/connections')
   return { ok: true, message: 'Model key saved. It is stored encrypted and never shown again.' }
+}
+
+/** Your own OpenAI-compatible model server, such as Ollama behind a tunnel. */
+export async function saveEndpointAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  const user = await requireUser()
+  const url = String(fd.get('url') ?? '')
+    .trim()
+    .replace(/\/$/, '')
+  const key = String(fd.get('key') ?? '').trim()
+  const problem = await endpointProblem(url, {
+    allowPrivate: Boolean(process.env.ALLOW_PRIVATE_LLM_ENDPOINTS),
+  })
+  if (problem) return { error: problem }
+  await setSecret(db(), encryptionKey(), user.id, SECRET_NAMES.llmEndpointUrl, url)
+  if (key) await setSecret(db(), encryptionKey(), user.id, SECRET_NAMES.llmEndpointKey, key)
+  revalidatePath('/connections')
+  return {
+    ok: true,
+    message: 'Server saved. Choose "Your own server" and its model name on the Settings page.',
+  }
 }
 
 export async function saveBoardAction(_prev: FormState, fd: FormData): Promise<FormState> {

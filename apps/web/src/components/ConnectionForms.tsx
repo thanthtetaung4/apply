@@ -8,6 +8,7 @@ import {
   removeSessionAction,
   revokeTokenAction,
   saveBoardAction,
+  saveEndpointAction,
   saveModelKeyAction,
 } from '@/app/actions/connections'
 import { Messages } from './Messages'
@@ -40,6 +41,57 @@ export function ModelKeyForm({ saved }: { saved: boolean }) {
             className="secondary"
             disabled={pending}
             onClick={() => start(() => removeSecretAction(['openrouter_api_key']))}
+          >
+            Remove
+          </button>
+        )}
+      </div>
+      <Messages state={state} />
+    </form>
+  )
+}
+
+export function EndpointForm({ saved }: { saved: boolean }) {
+  const { state, onSubmit, pending: busy } = useAction(saveEndpointAction)
+  const [pending, start] = useTransition()
+  return (
+    <form onSubmit={onSubmit}>
+      <div className="two">
+        <div className="field">
+          <label htmlFor="eu">
+            Server address {saved && <span className="chip ok">saved</span>}
+          </label>
+          <input
+            id="eu"
+            name="url"
+            type="url"
+            required
+            placeholder="https://your-tunnel.example.com/v1"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="ek">Key (optional)</label>
+          <input
+            id="ek"
+            name="key"
+            type="password"
+            autoComplete="off"
+            placeholder={saved ? 'Leave empty to keep the current key' : 'Ollama needs none'}
+          />
+        </div>
+      </div>
+      <div className="row">
+        <SubmitButton busy={busy} pending="Checking...">
+          {saved ? 'Replace server' : 'Save server'}
+        </SubmitButton>
+        {saved && (
+          <button
+            type="button"
+            className="secondary"
+            disabled={pending}
+            onClick={() =>
+              start(() => removeSecretAction(['llm_endpoint_url', 'llm_endpoint_key']))
+            }
           >
             Remove
           </button>

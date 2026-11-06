@@ -7,6 +7,11 @@ export interface LlmRequest {
   system: string
   /** JSON text of the task input. Offline providers parse it, hosted models read it as data. */
   prompt: string
+  /**
+   * JSON Schema of the reply. Providers that can enforce it while generating (Ollama's native
+   * API) use it; the gateway validates every reply against the same schema either way.
+   */
+  schema?: Record<string, unknown>
 }
 
 export interface LlmResponse {
@@ -25,7 +30,7 @@ export interface LlmProvider {
 export class LlmError extends Error {
   constructor(
     message: string,
-    readonly kind: 'http' | 'network' | 'output' | 'budget',
+    readonly kind: 'http' | 'network' | 'output' | 'budget' | 'quota',
     readonly status?: number,
   ) {
     super(message)
